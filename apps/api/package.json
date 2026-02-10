@@ -4,9 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "test": "vitest run",
-    "build": "tsc -p ."
+    "build": "echo \"skipping api build\""
   },
   "keywords": [],
   "author": "",

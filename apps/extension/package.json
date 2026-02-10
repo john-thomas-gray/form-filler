@@ -4,15 +4,22 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prebuild": "pnpm --filter @form-filler/shared build",
+    "build": "esbuild src/content.ts src/popup.ts --bundle --format=iife --platform=browser --outdir=dist",
+    "test": "vitest test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.28.2",
   "devDependencies": {
+    "@types/chrome": "^0.1.36",
+    "esbuild": "^0.27.3",
     "jsdom": "^28.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@form-filler/shared": "workspace:*"
   }
 }
