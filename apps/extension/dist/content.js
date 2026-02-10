@@ -14046,7 +14046,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       matchers: ["current location"]
     },
     phoneNumber: { value: "9146724526", matchers: ["phone", "number"] },
-    email: { value: "john.thom.gray@gmail.com", matchers: ["email"] },
+    email: { value: "johngraydev@gmail.com", matchers: ["email"] },
     linkedIn: {
       value: "https://www.linkedin.com/in/john-thomas-gray/",
       matchers: ["linkedin", "linkedin profile"]
@@ -14206,6 +14206,18 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         "work from the united states",
         "work in the united states"
       ]
+    },
+    where: {
+      value: "New York",
+      matchers: ["where are you based"]
+    },
+    repo: {
+      value: "",
+      matchers: ["repository name"]
+    },
+    username: {
+      value: "dondecanseco",
+      matchers: ["username"]
     }
   };
 

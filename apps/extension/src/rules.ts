@@ -15,7 +15,7 @@ export const RULES: Rules = {
   },
 
   phoneNumber: { value: "9146724526", matchers: ["phone", "number"] },
-  email: { value: "john.thom.gray@gmail.com", matchers: ["email"] },
+  email: { value: "johngraydev@gmail.com", matchers: ["email"] },
   linkedIn: {
     value: "https://www.linkedin.com/in/john-thomas-gray/",
     matchers: ["linkedin", "linkedin profile"],
@@ -182,5 +182,13 @@ export const RULES: Rules = {
   where: {
     value: "New York",
     matchers: ["where are you based"],
+  },
+  repo: {
+    value: "",
+    matchers: ["repository name"],
+  },
+  username: {
+    value: "dondecanseco",
+    matchers: ["username"],
   },
 };
