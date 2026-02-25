@@ -1,0 +1,23 @@
+{
+  "name": "@form-filler/resume-tailor",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@form-filler/shared": "workspace:*",
+    "docx": "^9.6.0",
+    "fastify": "^5.7.4"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5.9.0",
+    "vitest": "^4"
+  }
+}

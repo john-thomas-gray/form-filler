@@ -1,0 +1,1 @@
+{"version":3,"file":"headingBuilder.js","sourceRoot":"","sources":["../../src/section_builders/headingBuilder.ts"],"names":[],"mappings":"AAYA,SAAS,YAAY,CAAC,IAAsB;IAC1C,MAAM,EAAE,IAAI,EAAE,MAAM,EAAE,KAAK,EAAE,GAAG,IAAI,CAAC;IACrC,MAAM,EAAE,KAAK,EAAE,QAAQ,EAAE,KAAK,EAAE,GAAG,IAAI,CAAC,WAAW,CAAC;IAEpD,cAAc;IACd,gBAAgB;IAChB,iBAAiB;IACjB,eAAe;AACjB,CAAC"}
