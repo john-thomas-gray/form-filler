@@ -50,11 +50,22 @@ interface BuildEducationSectionData {
 export function buildEducationSection(
   data: BuildEducationSectionData,
 ): Section {
+  const title = data.title ?? "Education";
   const { educationSegments } = data;
-  const lines: Line[] = educationSegments.map(buildEducationLine);
+  const lines: Line[] = [
+    [
+      {
+        id: "education-section-header",
+        order: 0,
+        type: "section-header",
+        text: title,
+      },
+    ],
+    ...educationSegments.map(buildEducationLine),
+  ];
   return {
     type: "section",
-    title: data.title ?? "Education",
+    title,
     lines,
   };
 }

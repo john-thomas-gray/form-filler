@@ -1,4 +1,4 @@
-const userInputs = {
+export const userInputs = {
   contactInfo: {
     name: "John Gray",
     titles: ["Software Engineer", "Full Stack Developer"],

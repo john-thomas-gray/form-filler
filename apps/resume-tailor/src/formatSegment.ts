@@ -22,7 +22,7 @@ const segmentStyle: Record<SegmentType, Style> = {
   },
   url: { fontColor: "#b3d3a5", fontSize: 10, fontStyle: ["bold", "lowercase"] },
   category: {
-    fontColor: "#b3d3a5",
+    fontColor: "#d9ead3",
     fontSize: 10,
     fontStyle: ["italic", "capitalize"],
   },
@@ -34,7 +34,7 @@ const segmentStyle: Record<SegmentType, Style> = {
   "section-header": {
     fontColor: "#d9ead3",
     fontSize: 12,
-    fontStyle: ["bold", "uppercase"],
+    fontStyle: ["bold", "uppercase", "underline"],
   },
   "sub-header": {
     fontColor: "#b3d3a5",

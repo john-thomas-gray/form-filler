@@ -17,16 +17,28 @@ export function buildSkillsSection(data: BuildSkillsSectionData): Section {
   const normalizedCategories = categories.map(normalizeCategory);
 
   setMatchedAndUnmatchedSkills(normalizedCategories, listingSkills);
+  const resolvedTitle = title ?? "Skills";
 
   return {
     type: "section",
-    title: title ?? "Skills",
-    lines: buildSkillsLines(normalizedCategories),
+    title: resolvedTitle,
+    lines: buildSkillsLines(normalizedCategories, resolvedTitle),
   };
 }
 
-function buildSkillsLines(categories: NormalizedCategory[]): Line[] {
-  return categories.map((category) => {
+function buildSkillsLines(categories: NormalizedCategory[], title: string): Line[] {
+  const lines: Line[] = [
+    [
+      {
+        id: "skills-section-header",
+        order: 0,
+        type: "section-header",
+        text: title,
+      },
+    ],
+  ];
+
+  return lines.concat(categories.map((category) => {
     const {
       id: categoryId,
       order: categoryOrder,
@@ -79,7 +91,7 @@ function buildSkillsLines(categories: NormalizedCategory[]): Line[] {
     });
 
     return line;
-  });
+  }));
 }
 
 function normalizeCategory(category: RawCategory): NormalizedCategory {
