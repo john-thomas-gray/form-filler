@@ -3,11 +3,14 @@
   "name": "Form Filler (Dev)",
   "version": "0.0.0",
   "description": "Fills common form fields based on keyword rules.",
-  "action": {
-    "default_popup": "popup.html"
-  },
   "permissions": ["activeTab"],
   "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [
+    {
+      "resources": ["documents/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

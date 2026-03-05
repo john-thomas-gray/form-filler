@@ -55,5 +55,4 @@ const userSkills = {
         "Netlify",
     ],
 };
-const userSections = {};
 //# sourceMappingURL=config.js.map

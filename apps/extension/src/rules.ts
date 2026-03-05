@@ -6,11 +6,11 @@ export const RULES: Rules = {
   fullName: { value: "John Gray", matchers: ["full name", "name"] },
   title: { value: "Software Engineer", matchers: ["title"] },
 
-  city: { value: "Bronxville", matchers: ["city"] },
+  city: { value: "New York", matchers: ["city"] },
   state: { value: "NY", matchers: ["state"] },
-  country: { value: "United States", matchers: ["country"] },
+  country: { value: "+1 United States", matchers: ["country"] },
   currentLocation: {
-    value: "7 Tanglewylde Ave, Bronxville, NY 10708",
+    value: "New York, USA",
     matchers: ["current location"],
   },
 

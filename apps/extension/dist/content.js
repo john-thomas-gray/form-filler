@@ -13787,7 +13787,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     strategy: FillStrategySchema.optional(),
     inputTypes: external_exports.array(external_exports.string()).optional(),
     allowTextArea: external_exports.boolean().optional(),
-    radioValues: external_exports.array(external_exports.string()).optional()
+    radioValues: external_exports.array(external_exports.string()).optional(),
+    checkboxValues: external_exports.array(external_exports.string()).optional()
   });
   var RulesSchema = external_exports.record(external_exports.string(), FillRuleSchema);
   function normalize(s) {
@@ -14032,17 +14033,120 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
   }
 
+  // src/fileUpload.ts
+  function normalizeText(value) {
+    return value.replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function getInputLabelText(input) {
+    const parts = [];
+    const id = input.id;
+    if (id) {
+      const linkedLabel = document.querySelector(`label[for="${cssEscape(id)}"]`);
+      if (linkedLabel?.textContent) parts.push(linkedLabel.textContent);
+    }
+    const wrappingLabel = input.closest("label");
+    if (wrappingLabel?.textContent) parts.push(wrappingLabel.textContent);
+    const ariaLabel = input.getAttribute("aria-label");
+    if (ariaLabel) parts.push(ariaLabel);
+    const labelledBy = input.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      for (const refId of labelledBy.split(/\s+/)) {
+        const ref = document.getElementById(refId);
+        if (ref?.textContent) parts.push(ref.textContent);
+      }
+    }
+    const name = input.getAttribute("name");
+    if (name) parts.push(name);
+    const placeholder = input.getAttribute("placeholder");
+    if (placeholder) parts.push(placeholder);
+    if (id) parts.push(id);
+    return normalizeText(parts.join(" "));
+  }
+  function findFileUploader(matchers) {
+    const normalizedMatchers = matchers.map((matcher) => normalizeText(matcher)).filter(Boolean);
+    if (normalizedMatchers.length === 0) return null;
+    const fileInputs = Array.from(
+      document.querySelectorAll('input[type="file"]')
+    );
+    for (const input of fileInputs) {
+      const candidateText = getInputLabelText(input);
+      if (!candidateText) continue;
+      if (normalizedMatchers.some((matcher) => candidateText.includes(matcher))) {
+        return input;
+      }
+    }
+    return null;
+  }
+  function dispatchUploadEvents(input) {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function setInputFiles(input, files) {
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
+    if (!desc?.set) return false;
+    desc.set.call(input, files);
+    return true;
+  }
+  function isAlreadyUploaded(input) {
+    if ((input.files?.length ?? 0) > 0) return true;
+    if (input.value.trim().length > 0) return true;
+    const container = input.closest("label, fieldset, form, section, div");
+    if (!container) return false;
+    const controls = Array.from(
+      container.querySelectorAll("button, [role='button'], a, label, span")
+    );
+    return controls.some(
+      (el) => normalizeText(el.textContent ?? "").includes("replace")
+    );
+  }
+  async function loadDocumentFromExtension(relativePath, fileName) {
+    const url2 = chrome.runtime.getURL(relativePath);
+    const res = await fetch(url2);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return new File([blob], fileName, {
+      type: blob.type || "application/octet-stream"
+    });
+  }
+  async function uploadDocumentToMatchingInput(matchers, relativePath, fileName) {
+    const input = findFileUploader(matchers);
+    if (!input) return false;
+    if (isAlreadyUploaded(input)) return false;
+    const file2 = await loadDocumentFromExtension(relativePath, fileName);
+    if (!file2) return false;
+    const dt = new DataTransfer();
+    dt.items.add(file2);
+    const didSet = setInputFiles(input, dt.files);
+    if (!didSet) return false;
+    dispatchUploadEvents(input);
+    return true;
+  }
+  async function uploadResumeFromDocuments() {
+    return uploadDocumentToMatchingInput(
+      ["resume"],
+      "documents/resume.pdf",
+      "resume.pdf"
+    );
+  }
+  async function uploadCoverLetterFromDocuments() {
+    return uploadDocumentToMatchingInput(
+      ["cover letter"],
+      "documents/cover-letter.pdf",
+      "cover-letter.pdf"
+    );
+  }
+
   // src/rules.ts
   var RULES = {
     firstName: { value: "John", matchers: ["first name"] },
     lastName: { value: "Gray", matchers: ["last name", "family name"] },
     fullName: { value: "John Gray", matchers: ["full name", "name"] },
     title: { value: "Software Engineer", matchers: ["title"] },
-    city: { value: "Bronxville", matchers: ["city"] },
+    city: { value: "New York", matchers: ["city"] },
     state: { value: "NY", matchers: ["state"] },
-    country: { value: "United States", matchers: ["country"] },
+    country: { value: "+1 United States", matchers: ["country"] },
     currentLocation: {
-      value: "7 Tanglewylde Ave, Bronxville, NY 10708",
+      value: "New York, USA",
       matchers: ["current location"]
     },
     phoneNumber: { value: "9146724526", matchers: ["phone", "number"] },
@@ -14240,6 +14344,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     isFilling = true;
     try {
       fillPage(RULES, { touched, filled });
+      void uploadResumeFromDocuments();
+      void uploadCoverLetterFromDocuments();
     } finally {
       isFilling = false;
     }

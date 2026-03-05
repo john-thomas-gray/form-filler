@@ -16,6 +16,7 @@ export const FillRuleSchema = z.object({
   inputTypes: z.array(z.string()).optional(),
   allowTextArea: z.boolean().optional(),
   radioValues: z.array(z.string()).optional(),
+  checkboxValues: z.array(z.string()).optional(),
 });
 
 export type FillStrategy = z.infer<typeof FillStrategySchema>;

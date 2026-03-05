@@ -7,62 +7,79 @@ type Style = {
   textAlign?: "left" | "right" | "center";
 };
 
+const COLORS: Record<string, `#${string}`> = {
+  default: "#ffffff",
+  highlight: "#d9ead3",
+  highlightDark: "#b3d3a5",
+};
+
 const segmentStyle: Record<SegmentType, Style> = {
   name: {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.default,
     fontSize: 24,
     fontStyle: ["bold", "capitalize"],
     textAlign: "right",
   },
-  contact: { fontColor: "#ffffff", fontSize: 10, fontStyle: ["normal"] },
+  contact: { fontColor: COLORS.default, fontSize: 10, fontStyle: ["normal"] },
   link: {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.highlight,
     fontSize: 10,
     fontStyle: ["normal", "underline", "capitalize"],
   },
-  url: { fontColor: "#b3d3a5", fontSize: 10, fontStyle: ["bold", "lowercase"] },
+  url: {
+    fontColor: COLORS.highlightDark,
+    fontSize: 10,
+    fontStyle: ["bold", "lowercase"],
+  },
+
   category: {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.highlight,
     fontSize: 10,
     fontStyle: ["italic", "capitalize"],
   },
   skill: {
-    fontColor: "#ffffff",
+    fontColor: COLORS.default,
     fontSize: 10,
     fontStyle: ["normal", "capitalize"],
   },
   "section-header": {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.highlight,
     fontSize: 12,
     fontStyle: ["bold", "uppercase", "underline"],
   },
   "sub-header": {
-    fontColor: "#b3d3a5",
+    fontColor: COLORS.highlightDark,
+
     fontSize: 10,
     fontStyle: ["bold", "capitalize"],
   },
-  text: { fontColor: "#ffffff", fontSize: 9, fontStyle: ["normal"] },
+  text: { fontColor: COLORS.default, fontSize: 9, fontStyle: ["normal"] },
   "date-range": {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.highlight,
     fontSize: 9,
     fontStyle: ["italic", "capitalize"],
   },
   "education-institution": {
-    fontColor: "#b3d3a5",
+    fontColor: COLORS.highlightDark,
+
     fontSize: 9,
     fontStyle: ["bold", "capitalize"],
   },
   "education-credential": {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.highlight,
     fontSize: 9,
     fontStyle: ["bold", "capitalize"],
   },
   "education-separator": {
-    fontColor: "#d9ead3",
+    fontColor: COLORS.highlight,
     fontSize: 9,
     fontStyle: ["bold"],
   },
-  separator: { fontColor: "#d9ead3", fontSize: 10, fontStyle: ["normal"] },
+  separator: {
+    fontColor: COLORS.highlight,
+    fontSize: 10,
+    fontStyle: ["normal"],
+  },
 };
 
 export function formatSegment(segment: Segment) {

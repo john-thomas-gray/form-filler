@@ -17,6 +17,7 @@ export declare const FillRuleSchema: z.ZodObject<{
     inputTypes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     allowTextArea: z.ZodOptional<z.ZodBoolean>;
     radioValues: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    checkboxValues: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export type FillStrategy = z.infer<typeof FillStrategySchema>;
 export type FillRule = z.infer<typeof FillRuleSchema>;
@@ -32,6 +33,7 @@ export declare const RulesSchema: z.ZodRecord<z.ZodString, z.ZodObject<{
     inputTypes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     allowTextArea: z.ZodOptional<z.ZodBoolean>;
     radioValues: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    checkboxValues: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>>;
 export type Rules = z.infer<typeof RulesSchema>;
 export declare function normalize(s: string): string;

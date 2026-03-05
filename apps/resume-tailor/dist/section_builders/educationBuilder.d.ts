@@ -9,9 +9,5 @@ interface BuildEducationSectionData {
     educationSegments: EducationSegment[];
 }
 export declare function buildEducationSection(data: BuildEducationSectionData): Section;
-interface WriteEducationSectionToDocxData extends BuildEducationSectionData {
-    outputPath: string;
-}
-export declare function writeEducationSectionToDocx(data: WriteEducationSectionToDocxData): Promise<void>;
 export {};
 //# sourceMappingURL=educationBuilder.d.ts.map

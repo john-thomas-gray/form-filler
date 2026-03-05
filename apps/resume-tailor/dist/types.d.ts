@@ -37,13 +37,40 @@ export type Segment = (BaseSegment & {
 }) | (BaseSegment & {
     type: "separator";
     variant: "skill" | "sub-header" | "category";
-    text: "|";
+    text: " | " | ", ";
 });
 export type Line = readonly Segment[];
 export interface Section {
     type: "section";
     title: string;
     lines: Line[];
+}
+export interface RawCategory {
+    id: string;
+    order: number;
+    type: "raw-category";
+    name: string;
+    skills: string[];
+}
+export interface NormalizedCategory {
+    id: string;
+    order: number;
+    type: "normalized-category";
+    name: string;
+    matchedSkills: Segment[];
+    unmatchedSkills: Segment[];
+}
+export interface RawListingData {
+    welcomeToTheJungle: string;
+    overview: string;
+}
+export interface ListingData {
+    company: string;
+    jobTitle: string;
+    locations: string[];
+    description: string;
+    requirements: string;
+    skills: string[];
 }
 export {};
 //# sourceMappingURL=types.d.ts.map

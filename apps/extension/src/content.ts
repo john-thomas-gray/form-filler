@@ -1,4 +1,8 @@
 import { fillPage } from "./domFill";
+import {
+  uploadCoverLetterFromDocuments,
+  uploadResumeFromDocuments,
+} from "./fileUpload";
 import { RULES } from "./rules";
 
 const touched = new WeakSet<Element>();
@@ -31,6 +35,8 @@ function run() {
   isFilling = true;
   try {
     fillPage(RULES, { touched, filled });
+    void uploadResumeFromDocuments();
+    void uploadCoverLetterFromDocuments();
   } finally {
     isFilling = false;
   }

@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 function buildEducationLine(data) {
     const { institution, credential, dateRange } = data;
     return [
@@ -35,44 +34,23 @@ function buildEducationLine(data) {
     ];
 }
 export function buildEducationSection(data) {
+    const title = data.title ?? "Education";
     const { educationSegments } = data;
-    const lines = educationSegments.map(buildEducationLine);
+    const lines = [
+        [
+            {
+                id: "education-section-header",
+                order: 0,
+                type: "section-header",
+                text: title,
+            },
+        ],
+        ...educationSegments.map(buildEducationLine),
+    ];
     return {
         type: "section",
-        title: data.title ?? "Education",
+        title,
         lines,
     };
-}
-export async function writeEducationSectionToDocx(data) {
-    const { outputPath, ...sectionData } = data;
-    const educationSection = buildEducationSection(sectionData);
-    // Keep runtime dependency optional while still supporting real docx output.
-    const pkgName = "docx";
-    const docx = (await import(pkgName));
-    const { Document, Paragraph, TextRun, Packer, HeadingLevel } = docx;
-    const doc = new Document();
-    const children = [
-        new Paragraph({
-            text: educationSection.title,
-            heading: HeadingLevel?.HEADING_2 ?? "Heading2",
-        }),
-    ];
-    for (const line of educationSection.lines) {
-        const runs = line.map((segment) => {
-            return new TextRun({
-                text: segment.text,
-                bold: segment.type === "education-institution" ||
-                    segment.type === "education-credential",
-                italics: segment.type === "date-range",
-            });
-        });
-        children.push(new Paragraph({
-            children: runs,
-            spacing: { after: 120 },
-        }));
-    }
-    doc.addSection({ children });
-    const buffer = await Packer.toBuffer(doc);
-    await writeFile(outputPath, buffer);
 }
 //# sourceMappingURL=educationBuilder.js.map

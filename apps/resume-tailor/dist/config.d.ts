@@ -6,5 +6,4 @@ declare const userSkills: {
     DevOps: string[];
     Operations: string[];
 };
-declare const userSections: {};
 //# sourceMappingURL=config.d.ts.map

@@ -12,6 +12,7 @@ export const FillRuleSchema = z.object({
     inputTypes: z.array(z.string()).optional(),
     allowTextArea: z.boolean().optional(),
     radioValues: z.array(z.string()).optional(),
+    checkboxValues: z.array(z.string()).optional(),
 });
 export const RulesSchema = z.record(z.string(), FillRuleSchema);
 export function normalize(s) {
