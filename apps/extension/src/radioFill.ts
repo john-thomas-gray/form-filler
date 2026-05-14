@@ -10,6 +10,22 @@ function cleanQuestionText(value: string): string {
   return cleanText(value.replace(/\*/g, " "));
 }
 
+function normalizeLookupKey(value: string): string {
+  return cleanQuestionText(value).toLowerCase();
+}
+
+function buildSelectionLookup(
+  selections: RememberedRadioSelections,
+): Map<string, string> {
+  const lookup = new Map<string, string>();
+
+  for (const [groupLabel, radioLabel] of Object.entries(selections)) {
+    lookup.set(normalizeLookupKey(groupLabel), radioLabel);
+  }
+
+  return lookup;
+}
+
 export function getRadioLabelText(radio: HTMLInputElement): string {
   const ariaLabel = radio.getAttribute("aria-label");
   if (ariaLabel?.trim()) return cleanText(ariaLabel);
@@ -135,124 +151,103 @@ export function getRadioGroupLabelText(radio: HTMLInputElement): string {
   return "";
 }
 
-export function checkFirstRadioButtonWithLabel(
-  labelText: string,
-  groupLabelText?: string,
+export function checkRememberedRadioButtons(
+  selections: RememberedRadioSelections,
   root: ParentNode = document,
 ): boolean {
-  const desiredLabel = cleanText(labelText).toLowerCase();
-  const desiredGroupLabel = groupLabelText
-    ? cleanQuestionText(groupLabelText).toLowerCase()
-    : "";
+  let didCheck = false;
+  const lookup = buildSelectionLookup(selections);
   const radios = Array.from(root.querySelectorAll('input[type="radio"]'));
 
-  console.log("[form-filler] looking for remembered radio", {
-    labelText,
-    groupLabelText,
-    desiredLabel,
-    desiredGroupLabel,
-    radioCount: radios.length,
+  console.log("[form-filler] checking remembered radio selections", {
+    selectionCount: lookup.size,
+    pageRadioCount: radios.length,
+    selections,
   });
 
-  const radio = radios.find((el): el is HTMLInputElement => {
-    if (!(el instanceof HTMLInputElement)) {
-      console.log("[form-filler] skipping radio candidate: not input", { el });
-      return false;
+  for (const radio of radios) {
+    if (!(radio instanceof HTMLInputElement)) continue;
+    if (radio.disabled) {
+      console.log("[form-filler] skipping radio candidate: disabled", {
+        value: radio.value,
+        name: radio.name,
+        id: radio.id,
+      });
+      continue;
     }
 
-    const candidateLabel = getRadioLabelText(el);
-    const candidateGroupLabel = getRadioGroupLabelText(el);
-    const labelMatches = candidateLabel.toLowerCase() === desiredLabel;
-    const groupMatches =
-      !desiredGroupLabel ||
-      candidateGroupLabel.toLowerCase() === desiredGroupLabel;
+    const candidateGroupLabel = getRadioGroupLabelText(radio);
+    const rememberedRadioLabel = lookup.get(
+      normalizeLookupKey(candidateGroupLabel),
+    );
 
-    console.log("[form-filler] radio candidate", {
-      candidateLabel,
+    console.log("[form-filler] radio page label lookup", {
       candidateGroupLabel,
-      value: el.value,
-      name: el.name,
-      id: el.id,
-      disabled: el.disabled,
-      checked: el.checked,
+      hasRememberedSelection: Boolean(rememberedRadioLabel),
+      rememberedRadioLabel,
+      value: radio.value,
+      name: radio.name,
+      id: radio.id,
+    });
+
+    if (!rememberedRadioLabel) continue;
+
+    const candidateLabel = getRadioLabelText(radio);
+    const labelMatches =
+      normalizeLookupKey(candidateLabel) ===
+      normalizeLookupKey(rememberedRadioLabel);
+
+    console.log("[form-filler] remembered radio candidate", {
+      candidateGroupLabel,
+      rememberedRadioLabel,
+      candidateLabel,
       labelMatches,
-      groupMatches,
+      checked: radio.checked,
+      value: radio.value,
+      name: radio.name,
+      id: radio.id,
     });
 
-    if (el.disabled) return false;
-    if (!labelMatches) return false;
-    if (!desiredGroupLabel) return true;
+    if (!labelMatches) continue;
 
-    return groupMatches;
-  });
+    if (radio.checked) {
+      console.log("[form-filler] matching radio already checked", {
+        label: candidateLabel,
+        groupLabel: candidateGroupLabel,
+        value: radio.value,
+        name: radio.name,
+        id: radio.id,
+      });
+      continue;
+    }
 
-  if (!radio) {
-    console.log("[form-filler] no matching radio found", {
-      labelText,
-      groupLabelText,
+    console.log("[form-filler] clicking matching radio from page lookup", {
+      label: candidateLabel,
+      groupLabel: candidateGroupLabel,
+      value: radio.value,
+      name: radio.name,
+      id: radio.id,
     });
-    return false;
-  }
 
-  if (radio.checked) {
-    console.log("[form-filler] matching radio already checked", {
+    radio.click();
+    radio.dispatchEvent(new Event("input", { bubbles: true }));
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+    didCheck = true;
+
+    console.log("[form-filler] radio click complete", {
+      checked: radio.checked,
       label: getRadioLabelText(radio),
       groupLabel: getRadioGroupLabelText(radio),
       value: radio.value,
       name: radio.name,
       id: radio.id,
     });
-    return false;
-  }
-
-  console.log("[form-filler] clicking matching radio", {
-    label: getRadioLabelText(radio),
-    groupLabel: getRadioGroupLabelText(radio),
-    value: radio.value,
-    name: radio.name,
-    id: radio.id,
-  });
-
-  radio.click();
-  radio.dispatchEvent(new Event("input", { bubbles: true }));
-  radio.dispatchEvent(new Event("change", { bubbles: true }));
-
-  console.log("[form-filler] radio click complete", {
-    checked: radio.checked,
-    label: getRadioLabelText(radio),
-    groupLabel: getRadioGroupLabelText(radio),
-    value: radio.value,
-    name: radio.name,
-    id: radio.id,
-  });
-
-  return true;
-}
-
-export function checkRememberedRadioButtons(
-  selections: RememberedRadioSelections,
-  root: ParentNode = document,
-): boolean {
-  let didCheck = false;
-  const entries = Object.entries(selections);
-
-  console.log("[form-filler] checking remembered radio selections", {
-    selectionCount: entries.length,
-    selections,
-  });
-
-  for (const [groupLabel, radioLabel] of entries) {
-    console.log("[form-filler] checking remembered radio selection", {
-      groupLabel,
-      radioLabel,
-    });
-    didCheck =
-      checkFirstRadioButtonWithLabel(radioLabel, groupLabel, root) || didCheck;
   }
 
   console.log("[form-filler] remembered radio fill finished", {
     didCheck,
-    selectionCount: entries.length,
+    selectionCount: lookup.size,
+    pageRadioCount: radios.length,
   });
 
   return didCheck;

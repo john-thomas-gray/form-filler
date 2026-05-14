@@ -1,5 +1,6 @@
 import type { FillRule } from "@form-filler/shared";
 import { cssEscape } from "../utils/normalization";
+import { isListboxComboboxInput } from "./listboxFill";
 
 export type QuestionConstructKind =
   | "text"
@@ -100,6 +101,9 @@ function setNativeValue(
 }
 
 function isTextInput(el: HTMLInputElement): boolean {
+  const element: Element = el;
+  if (isListboxComboboxInput(element)) return false;
+
   const type = (el.getAttribute("type") || "text").toLowerCase();
   return ![
     "button",

@@ -1,9 +1,17 @@
 import type { Rules } from "@form-filler/shared";
 import { pickBestRule } from "@form-filler/shared";
 import {
+  pressRememberedYesNoCheckboxButtons,
+  type RememberedYesNoSelections,
+} from "./buttonPress";
+import {
   getCandidateText,
   recognizeQuestionConstructs,
 } from "./questionConstructs";
+import {
+  selectRememberedListboxOptions,
+  type RememberedListboxSelections,
+} from "./listboxFill";
 import {
   checkRememberedRadioButtons,
   type RememberedRadioSelections,
@@ -17,6 +25,8 @@ export function fillPage(
     touched?: WeakSet<Element>;
     filled?: WeakSet<Element>;
     radioSelections?: RememberedRadioSelections;
+    yesNoSelections?: RememberedYesNoSelections;
+    listboxSelections?: RememberedListboxSelections;
   },
 ) {
   const touched = opts?.touched;
@@ -26,6 +36,8 @@ export function fillPage(
     hasTouchedSet: Boolean(touched),
     hasFilledSet: Boolean(filled),
     radioSelections: opts?.radioSelections,
+    yesNoSelections: opts?.yesNoSelections,
+    listboxSelections: opts?.listboxSelections,
   });
 
   if (opts?.radioSelections) {
@@ -35,6 +47,41 @@ export function fillPage(
     checkRememberedRadioButtons(opts.radioSelections);
   } else {
     console.log("[form-filler] skipping radio fill: no remembered selections");
+  }
+
+  if (
+    opts?.yesNoSelections &&
+    Object.keys(opts.yesNoSelections).length > 0
+  ) {
+    console.log("[form-filler] starting yes/no fill", {
+      yesNoSelections: opts.yesNoSelections,
+    });
+    pressRememberedYesNoCheckboxButtons(
+      opts.yesNoSelections,
+      document,
+      filled,
+    );
+  } else {
+    console.log("[form-filler] skipping yes/no fill: no remembered selections");
+  }
+
+  if (
+    opts?.listboxSelections &&
+    Object.keys(opts.listboxSelections).length > 0
+  ) {
+    console.log("[form-filler] starting listbox fill", {
+      listboxSelections: opts.listboxSelections,
+    });
+    const didQueueListboxFill = selectRememberedListboxOptions(
+      opts.listboxSelections,
+      document,
+      filled,
+    );
+    if (didQueueListboxFill) {
+      return;
+    }
+  } else {
+    console.log("[form-filler] skipping listbox fill: no remembered selections");
   }
 
   for (const construct of recognizeQuestionConstructs()) {
