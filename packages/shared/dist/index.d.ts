@@ -4,6 +4,7 @@ export declare const FillStrategySchema: z.ZodEnum<{
     select: "select";
     radio: "radio";
     checkbox: "checkbox";
+    button: "button";
 }>;
 export declare const FillRuleSchema: z.ZodObject<{
     value: z.ZodString;
@@ -13,6 +14,7 @@ export declare const FillRuleSchema: z.ZodObject<{
         select: "select";
         radio: "radio";
         checkbox: "checkbox";
+        button: "button";
     }>>;
     inputTypes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     allowTextArea: z.ZodOptional<z.ZodBoolean>;
@@ -29,6 +31,7 @@ export declare const RulesSchema: z.ZodRecord<z.ZodString, z.ZodObject<{
         select: "select";
         radio: "radio";
         checkbox: "checkbox";
+        button: "button";
     }>>;
     inputTypes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     allowTextArea: z.ZodOptional<z.ZodBoolean>;
@@ -39,4 +42,5 @@ export type Rules = z.infer<typeof RulesSchema>;
 export declare function normalize(s: string): string;
 export declare function scoreMatchers(candidateText: string, matchers: string[]): number;
 export declare function pickBestRule(candidateText: string, rules: Rules): FillRule | null;
+export * from "./learning";
 //# sourceMappingURL=index.d.ts.map

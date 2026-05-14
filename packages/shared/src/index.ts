@@ -5,6 +5,7 @@ export const FillStrategySchema = z.enum([
   "select",
   "radio",
   "checkbox",
+  "button",
 ]);
 
 export const FillRuleSchema = z.object({
@@ -50,6 +51,92 @@ export function scoreMatchers(
   return best;
 }
 
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+function normalizeAnswer(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function extractYearsThreshold(value: string): number | null {
+  const match = value
+    .toLowerCase()
+    .match(
+      /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*\+?\s+years?\b/,
+    );
+
+  if (!match) return null;
+
+  const raw = match[1];
+  if (/^\d+$/.test(raw)) return Number(raw);
+
+  return NUMBER_WORDS[raw] ?? null;
+}
+
+function isExperienceThresholdQuestion(value: string): boolean {
+  const normalized = normalize(value);
+  return (
+    normalized.includes("experience") ||
+    normalized.includes("professionalwork") ||
+    normalized.includes("workexperience") ||
+    normalized.includes("masters")
+  );
+}
+
+function scoreYearsThresholdMatcher(
+  candidateText: string,
+  matcher: string,
+  answer: string,
+): number {
+  if (
+    !isExperienceThresholdQuestion(candidateText) ||
+    !isExperienceThresholdQuestion(matcher)
+  ) {
+    return 0;
+  }
+
+  const candidateYears = extractYearsThreshold(candidateText);
+  const matcherYears = extractYearsThreshold(matcher);
+  if (candidateYears === null || matcherYears === null) return 0;
+
+  const normalizedAnswer = normalizeAnswer(answer);
+  const isYes = normalizedAnswer === "yes" || normalizedAnswer === "true";
+  const isNo = normalizedAnswer === "no" || normalizedAnswer === "false";
+
+  if (isYes && candidateYears <= matcherYears) {
+    return normalize(matcher).length - Math.abs(matcherYears - candidateYears);
+  }
+
+  if (isNo && candidateYears >= matcherYears) {
+    return normalize(matcher).length - Math.abs(matcherYears - candidateYears);
+  }
+
+  return 0;
+}
+
+function scoreRule(candidateText: string, rule: FillRule): number {
+  let best = scoreMatchers(candidateText, rule.matchers);
+
+  for (const matcher of rule.matchers) {
+    best = Math.max(
+      best,
+      scoreYearsThresholdMatcher(candidateText, matcher, rule.value),
+    );
+  }
+
+  return best;
+}
+
 export function pickBestRule(
   candidateText: string,
   rules: Rules,
@@ -60,7 +147,7 @@ export function pickBestRule(
 
   for (const key of Object.keys(rules)) {
     const rule = rules[key];
-    const score = scoreMatchers(candidateText, rule.matchers);
+    const score = scoreRule(candidateText, rule);
     if (score <= 0) continue;
 
     if (score > bestScore) {
@@ -76,3 +163,5 @@ export function pickBestRule(
   if (tied) return null;
   return bestRule;
 }
+
+export * from "./learning";

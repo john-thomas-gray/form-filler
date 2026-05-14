@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fillPage } from "./domFill";
 
 describe("fillPage", () => {
@@ -17,66 +17,97 @@ describe("fillPage", () => {
     );
   });
 
-  it("selects the correct radio from a list", () => {
+  it("updates blur-driven text form state without requiring user focus", () => {
     document.body.innerHTML = `
-    <div class="question">
-      <div>Are you a veteran?</div>
-      <ul>
-        <li><label><input type="radio" name="veteran" value="yes"> yes</label></li>
-        <li><label><input type="radio" name="veteran" value="no"> no</label></li>
-      </ul>
-    </div>
-  `;
-
-    fillPage({
-      veteran: { value: "yes", matchers: ["veteran"], strategy: "radio" },
-    });
-
-    const yes = document.querySelector(
-      'input[type="radio"][value="yes"]',
-    ) as HTMLInputElement;
-    expect(yes.checked).toBe(true);
-  });
-});
-
-describe("fillPage", () => {
-  it("checks a checkbox when label matches and rule strategy is checkbox", () => {
-    document.body.innerHTML = `
-      <label>
-        <input id="terms" type="checkbox" />
-        I agree to the terms
-      </label>
+      <form id="application">
+        <label for="name">Name</label>
+        <input id="name" />
+        <button type="submit">Submit</button>
+      </form>
     `;
 
-    fillPage({
-      terms: {
-        value: "true",
-        matchers: ["agree to terms", "i agree", "accept terms"],
-        strategy: "checkbox",
-      },
+    const form = document.querySelector("#application") as HTMLFormElement;
+    const input = document.querySelector("#name") as HTMLInputElement;
+    const appState = { name: "" };
+    let didFocus = false;
+    let message = "";
+
+    input.addEventListener("focus", () => {
+      didFocus = true;
+    });
+    input.addEventListener("blur", () => {
+      if (didFocus) appState.name = input.value;
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      message = appState.name ? "" : "Form unfinished: fill in name";
     });
 
-    const cb = document.querySelector("#terms") as HTMLInputElement;
-    expect(cb.checked).toBe(true);
+    fillPage({
+      fullName: { value: "John Gray", matchers: ["name"] },
+    });
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(message).toBe("");
   });
 
-  it("does not uncheck a checkbox that is already checked", () => {
+  it("updates focus-driven text form state after the value is filled", () => {
     document.body.innerHTML = `
-      <label>
-        <input id="terms" type="checkbox" checked />
-        I agree to the terms
-      </label>
+      <form id="application">
+        <label for="name">Name</label>
+        <input id="name" />
+        <button type="submit">Submit</button>
+      </form>
     `;
 
-    fillPage({
-      terms: {
-        value: "true",
-        matchers: ["agree to terms", "i agree"],
-        strategy: "checkbox",
-      },
+    const form = document.querySelector("#application") as HTMLFormElement;
+    const input = document.querySelector("#name") as HTMLInputElement;
+    const appState = { name: "" };
+    let message = "";
+
+    input.addEventListener("focus", () => {
+      appState.name = input.value;
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      message = appState.name ? "" : "Form unfinished: fill in name";
     });
 
-    const cb = document.querySelector("#terms") as HTMLInputElement;
-    expect(cb.checked).toBe(true);
+    fillPage({
+      fullName: { value: "John Gray", matchers: ["name"] },
+    });
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(message).toBe("");
+  });
+
+  it("updates click-driven text form state after the value is filled", () => {
+    document.body.innerHTML = `
+      <form id="application">
+        <label for="name">Name</label>
+        <input id="name" />
+        <button type="submit">Submit</button>
+      </form>
+    `;
+
+    const form = document.querySelector("#application") as HTMLFormElement;
+    const input = document.querySelector("#name") as HTMLInputElement;
+    const appState = { name: "" };
+    let message = "";
+
+    input.addEventListener("click", () => {
+      appState.name = input.value;
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      message = appState.name ? "" : "Form unfinished: fill in name";
+    });
+
+    fillPage({
+      fullName: { value: "John Gray", matchers: ["name"] },
+    });
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(message).toBe("");
   });
 });

@@ -1,11 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   findCoverLetterUploader,
   findFileUploader,
   findResumeUploader,
+  uploadDocumentToMatchingInput,
 } from "./fileUpload";
 
 describe("findFileUploader", () => {
+  const originalChrome = (globalThis as any).chrome;
+
+  afterEach(() => {
+    (globalThis as any).chrome = originalChrome;
+    vi.unstubAllGlobals();
+  });
+
   it("finds uploader using a general matcher", () => {
     document.body.innerHTML = `
       <label for="resume-upload">Upload your resume</label>
@@ -47,5 +55,28 @@ describe("findFileUploader", () => {
 
     const input = findResumeUploader();
     expect(input?.id).toBe("_systemfield_resume");
+  });
+
+  it("skips upload instead of throwing when the bundled document is missing", async () => {
+    document.body.innerHTML = `
+      <label for="cover-letter">Cover letter</label>
+      <input id="cover-letter" type="file" />
+    `;
+    (globalThis as any).chrome = {
+      runtime: {
+        getURL(path: string) {
+          return `chrome-extension://test/${path}`;
+        },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    await expect(
+      uploadDocumentToMatchingInput(
+        ["cover letter"],
+        "documents/cover-letter.pdf",
+        "cover-letter.pdf",
+      ),
+    ).resolves.toBe(false);
   });
 });

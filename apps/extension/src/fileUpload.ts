@@ -101,14 +101,18 @@ async function loadDocumentFromExtension(
   relativePath: string,
   fileName: string,
 ): Promise<File | null> {
-  const url = chrome.runtime.getURL(relativePath);
-  const res = await fetch(url);
-  if (!res.ok) return null;
+  try {
+    const url = chrome.runtime.getURL(relativePath);
+    const res = await fetch(url);
+    if (!res.ok) return null;
 
-  const blob = await res.blob();
-  return new File([blob], fileName, {
-    type: blob.type || "application/octet-stream",
-  });
+    const blob = await res.blob();
+    return new File([blob], fileName, {
+      type: blob.type || "application/octet-stream",
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function uploadDocumentToMatchingInput(
@@ -116,21 +120,25 @@ export async function uploadDocumentToMatchingInput(
   relativePath: string,
   fileName: string,
 ): Promise<boolean> {
-  const input = findFileUploader(matchers);
-  if (!input) return false;
-  if (isAlreadyUploaded(input)) return false;
+  try {
+    const input = findFileUploader(matchers);
+    if (!input) return false;
+    if (isAlreadyUploaded(input)) return false;
 
-  const file = await loadDocumentFromExtension(relativePath, fileName);
-  if (!file) return false;
+    const file = await loadDocumentFromExtension(relativePath, fileName);
+    if (!file) return false;
 
-  const dt = new DataTransfer();
-  dt.items.add(file);
+    const dt = new DataTransfer();
+    dt.items.add(file);
 
-  const didSet = setInputFiles(input, dt.files);
-  if (!didSet) return false;
+    const didSet = setInputFiles(input, dt.files);
+    if (!didSet) return false;
 
-  dispatchUploadEvents(input);
-  return true;
+    dispatchUploadEvents(input);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function uploadResumeFromDocuments(): Promise<boolean> {

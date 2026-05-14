@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "echo \"skipping api build\""
+    "build": "echo \"skipping api build\"",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",

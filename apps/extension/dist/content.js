@@ -6,6 +6,112 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
+  // src/buttonPress.ts
+  var BUTTON_CHOICE_SELECTOR = [
+    "button",
+    '[role="button"]',
+    '[role="radio"]',
+    '[role="checkbox"]',
+    "[aria-pressed]",
+    "[aria-checked]",
+    'input[type="button"]'
+  ].join(",");
+  function cleanText(value) {
+    return value.replace(/\s+/g, " ").trim();
+  }
+  function normalizeToken(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+  function getChoiceText(choice) {
+    const ariaLabel = choice.getAttribute("aria-label");
+    if (ariaLabel?.trim()) return cleanText(ariaLabel);
+    if (choice instanceof HTMLInputElement) {
+      return cleanText(choice.value);
+    }
+    return cleanText(choice.textContent ?? "");
+  }
+  function isActionButton(choice) {
+    const text = normalizeToken(getChoiceText(choice));
+    if (choice instanceof HTMLButtonElement && choice.type === "submit") {
+      return true;
+    }
+    return [
+      "submit",
+      "submitapplication",
+      "upload",
+      "uploadfile",
+      "choosefile",
+      "resume"
+    ].includes(text);
+  }
+  function isButtonChoice(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.hasAttribute("disabled")) return false;
+    if (el.getAttribute("aria-disabled") === "true") return false;
+    const text = getChoiceText(el);
+    if (!text) return false;
+    return !isActionButton(el);
+  }
+  function getChoices(container) {
+    return Array.from(container.querySelectorAll(BUTTON_CHOICE_SELECTOR)).filter(
+      isButtonChoice
+    );
+  }
+  function removeChoiceText(text, choiceText) {
+    const escaped = choiceText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(escaped, "gi"), " ");
+  }
+  function getQuestionText(container, choices) {
+    let text = cleanText(container.textContent ?? "");
+    for (const choice of choices) {
+      const choiceText = getChoiceText(choice);
+      if (choiceText) text = removeChoiceText(text, choiceText);
+    }
+    return cleanText(text.replace(/\*/g, " "));
+  }
+  function getPreviousSiblingQuestionText(container) {
+    let previous = container.previousElementSibling;
+    while (previous) {
+      if (previous instanceof HTMLElement) {
+        if (getChoices(previous).length > 0) return "";
+        if (previous.matches("input, textarea, select, button")) return "";
+        const text = cleanText((previous.textContent ?? "").replace(/\*/g, " "));
+        if (text) return text;
+      }
+      previous = previous.previousElementSibling;
+    }
+    return "";
+  }
+  function findButtonChoiceGroupFor(choice) {
+    let current = choice.parentElement;
+    for (let i = 0; i < 6 && current; i += 1) {
+      const choices = getChoices(current);
+      if (choices.length >= 2 && choices.length <= 8) {
+        const questionText = getQuestionText(current, choices) || getPreviousSiblingQuestionText(current);
+        if (questionText.length > 5) {
+          return { container: current, questionText, choices };
+        }
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+  function getButtonPressObservation(target) {
+    if (!(target instanceof Element)) return null;
+    const choice = target.closest(BUTTON_CHOICE_SELECTOR);
+    if (!choice || !isButtonChoice(choice)) return null;
+    const group = findButtonChoiceGroupFor(choice);
+    if (!group) return null;
+    const answer = getChoiceText(choice);
+    if (!answer) return null;
+    return {
+      question: group.questionText,
+      answer,
+      choice,
+      strategy: "button"
+    };
+  }
+
   // ../../node_modules/.pnpm/zod@4.3.6/node_modules/zod/v4/classic/external.js
   var external_exports = {};
   __export(external_exports, {
@@ -13774,12 +13880,111 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   // ../../node_modules/.pnpm/zod@4.3.6/node_modules/zod/v4/classic/external.js
   config(en_default());
 
+  // ../../packages/shared/dist/learning.js
+  function createAnswerMemory() {
+    return { groups: [] };
+  }
+  function cleanText2(value) {
+    return value.replace(/\s+/g, " ").trim();
+  }
+  function normalizeQuestion(value) {
+    return value.toLowerCase().trim().replace(/[\u2019']/g, "'").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "");
+  }
+  function normalizedAnswer(value) {
+    return cleanText2(value).toLowerCase();
+  }
+  function shouldMergeByAnswer(answer) {
+    const normalized = normalizedAnswer(answer);
+    const lowInformationAnswers = /* @__PURE__ */ new Set([
+      "yes",
+      "no",
+      "true",
+      "false",
+      "n/a",
+      "na",
+      "none",
+      "other",
+      "prefer not to say"
+    ]);
+    return normalized.length >= 3 && !lowInformationAnswers.has(normalized);
+  }
+  function uniqueQuestions(questions) {
+    const seen = /* @__PURE__ */ new Set();
+    const result = [];
+    for (const question of questions) {
+      const cleaned = cleanText2(question);
+      const key = normalizeQuestion(cleaned);
+      if (!cleaned || seen.has(key))
+        continue;
+      seen.add(key);
+      result.push(cleaned);
+    }
+    return result;
+  }
+  function withoutQuestion(groups, question) {
+    const questionKey = normalizeQuestion(question);
+    return groups.map((group) => ({
+      ...group,
+      questions: group.questions.filter((q) => normalizeQuestion(q) !== questionKey)
+    })).filter((group) => group.questions.length > 0);
+  }
+  function applyObservationMetadata(group, observation) {
+    const next = { ...group };
+    if (!next.strategy && observation.strategy) {
+      next.strategy = observation.strategy;
+    }
+    if (!next.inputTypes && observation.inputTypes) {
+      next.inputTypes = observation.inputTypes;
+    }
+    if (next.allowTextArea === void 0 && observation.allowTextArea !== void 0) {
+      next.allowTextArea = observation.allowTextArea;
+    }
+    return next;
+  }
+  function recordAnswer(memory, observation) {
+    const question = cleanText2(observation.question);
+    const answer = cleanText2(observation.answer);
+    if (!question || !answer)
+      return memory;
+    const answerKey = normalizedAnswer(answer);
+    const groups = withoutQuestion(memory.groups, question);
+    const existing = shouldMergeByAnswer(answer) ? groups.find((group) => normalizedAnswer(group.answer) === answerKey) : void 0;
+    if (existing) {
+      return {
+        groups: groups.map((group) => group === existing ? applyObservationMetadata({
+          ...group,
+          questions: uniqueQuestions([...group.questions, question])
+        }, observation) : group)
+      };
+    }
+    const nextGroup = applyObservationMetadata({
+      answer,
+      questions: [question]
+    }, observation);
+    return {
+      groups: [...groups, nextGroup]
+    };
+  }
+  function buildRulesFromMemory(memory) {
+    return Object.fromEntries(memory.groups.map((group, index) => [
+      `learned_${index + 1}`,
+      {
+        value: group.answer,
+        matchers: group.questions,
+        strategy: group.strategy,
+        inputTypes: group.inputTypes,
+        allowTextArea: group.allowTextArea
+      }
+    ]));
+  }
+
   // ../../packages/shared/dist/index.js
   var FillStrategySchema = external_exports.enum([
     "test",
     "select",
     "radio",
-    "checkbox"
+    "checkbox",
+    "button"
   ]);
   var FillRuleSchema = external_exports.object({
     value: external_exports.string(),
@@ -13806,13 +14011,67 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
     return best;
   }
+  var NUMBER_WORDS = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10
+  };
+  function normalizeAnswer(value) {
+    return value.trim().toLowerCase();
+  }
+  function extractYearsThreshold(value) {
+    const match = value.toLowerCase().match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*\+?\s+years?\b/);
+    if (!match)
+      return null;
+    const raw = match[1];
+    if (/^\d+$/.test(raw))
+      return Number(raw);
+    return NUMBER_WORDS[raw] ?? null;
+  }
+  function isExperienceThresholdQuestion(value) {
+    const normalized = normalize(value);
+    return normalized.includes("experience") || normalized.includes("professionalwork") || normalized.includes("workexperience") || normalized.includes("masters");
+  }
+  function scoreYearsThresholdMatcher(candidateText, matcher, answer) {
+    if (!isExperienceThresholdQuestion(candidateText) || !isExperienceThresholdQuestion(matcher)) {
+      return 0;
+    }
+    const candidateYears = extractYearsThreshold(candidateText);
+    const matcherYears = extractYearsThreshold(matcher);
+    if (candidateYears === null || matcherYears === null)
+      return 0;
+    const normalizedAnswer2 = normalizeAnswer(answer);
+    const isYes = normalizedAnswer2 === "yes" || normalizedAnswer2 === "true";
+    const isNo = normalizedAnswer2 === "no" || normalizedAnswer2 === "false";
+    if (isYes && candidateYears <= matcherYears) {
+      return normalize(matcher).length - Math.abs(matcherYears - candidateYears);
+    }
+    if (isNo && candidateYears >= matcherYears) {
+      return normalize(matcher).length - Math.abs(matcherYears - candidateYears);
+    }
+    return 0;
+  }
+  function scoreRule(candidateText, rule) {
+    let best = scoreMatchers(candidateText, rule.matchers);
+    for (const matcher of rule.matchers) {
+      best = Math.max(best, scoreYearsThresholdMatcher(candidateText, matcher, rule.value));
+    }
+    return best;
+  }
   function pickBestRule(candidateText, rules) {
     let bestRule = null;
     let bestScore = 0;
     let tied = false;
     for (const key of Object.keys(rules)) {
       const rule = rules[key];
-      const score = scoreMatchers(candidateText, rule.matchers);
+      const score = scoreRule(candidateText, rule);
       if (score <= 0)
         continue;
       if (score > bestScore) {
@@ -13839,196 +14098,403 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   };
 
-  // src/radioFill.ts
-  function normalizeToken(s) {
-    return s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  }
-  function matchesRadioOption(rule, optionText, optionValue) {
-    const want = normalizeToken(rule.value);
-    const wantSet = /* @__PURE__ */ new Set([want]);
-    if (rule.radioValues) {
-      for (const v of rule.radioValues) wantSet.add(normalizeToken(v));
-    }
-    return wantSet.has(normalizeToken(optionText)) || wantSet.has(normalizeToken(optionValue));
-  }
-  function getRadioLabelText(radio) {
-    const id = radio.id;
-    if (id) {
-      const label = document.querySelector(`label[for="${cssEscape(id)}"]`);
-      const t = label?.textContent?.trim();
-      if (t) return t;
-    }
-    const wrappingLabel = radio.closest("label");
-    const t2 = wrappingLabel?.textContent?.trim();
-    if (t2) return t2;
-    const parentText = radio.parentElement?.textContent?.trim();
-    return parentText ?? "";
-  }
-  function findNearbyRadioGroup(el) {
-    let cur = el;
-    for (let i = 0; i < 5 && cur; i++) {
-      const radios = Array.from(
-        cur.querySelectorAll('input[type="radio"]')
-      );
-      if (radios.length > 0) return radios;
-      cur = cur.parentElement;
-    }
-    const parent = el.parentElement;
-    if (!parent) return [];
-    return Array.from(
-      parent.querySelectorAll('input[type="radio"]')
-    );
-  }
-  function clickRadio(radio) {
-    if (radio.disabled) return;
-    radio.click();
-    radio.dispatchEvent(new Event("input", { bubbles: true }));
-    radio.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  // src/domFill.ts
-  function isFillable(el) {
-    if (el instanceof HTMLTextAreaElement) return true;
-    if (el instanceof HTMLSelectElement) return true;
-    if (!(el instanceof HTMLInputElement)) return false;
-    const type = (el.getAttribute("type") || "text").toLowerCase();
-    if (type === "password" || type === "hidden") return false;
-    return true;
-  }
-  function getCandidateText(el) {
-    const id = el.id;
-    if (id) {
-      const safeId = cssEscape(id);
-      const label = document.querySelector(`label[for="${safeId}"]`);
-      if (label?.textContent?.trim()) return label.textContent;
-    }
-    const wrappingLabel = el.closest("label");
-    if (wrappingLabel?.textContent?.trim()) return wrappingLabel.textContent;
-    const ariaLabel = el.getAttribute("aria-label");
-    if (ariaLabel?.trim()) return ariaLabel;
-    const ariaLabelledBy = el.getAttribute("aria-labelledby");
-    if (ariaLabelledBy) {
-      const text = ariaLabelledBy.split(/\s+/).map((id2) => document.getElementById(id2)?.textContent ?? "").join(" ").trim();
-      if (text) return text;
-    }
-    const placeholder = el.getAttribute("placeholder");
-    if (placeholder?.trim()) return placeholder;
-    return "";
+  // src/questionConstructs.ts
+  function cleanText3(value) {
+    return value.replace(/\s+/g, " ").trim();
   }
   function dispatchEvents(el) {
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function dispatchPointerEvent(el, type) {
+    const view = el.ownerDocument.defaultView;
+    if (!view) return;
+    const init = { bubbles: true, cancelable: true };
+    const event = typeof view.PointerEvent === "function" ? new view.PointerEvent(type, init) : new view.Event(type, init);
+    el.dispatchEvent(event);
+  }
+  function dispatchMouseEvent(el, type) {
+    const view = el.ownerDocument.defaultView;
+    if (!view) return;
+    el.dispatchEvent(new view.MouseEvent(type, { bubbles: true, cancelable: true }));
+  }
+  function focusForProgrammaticFill(el) {
+    try {
+      el.focus({ preventScroll: true });
+    } catch {
+      el.focus();
+    }
+  }
+  function activateAfterProgrammaticFill(el) {
+    const alreadyFocused = document.activeElement === el;
+    dispatchPointerEvent(el, "pointerdown");
+    dispatchMouseEvent(el, "mousedown");
+    if (!alreadyFocused) focusForProgrammaticFill(el);
+    dispatchPointerEvent(el, "pointerup");
+    dispatchMouseEvent(el, "mouseup");
+    dispatchMouseEvent(el, "click");
+    return !alreadyFocused && document.activeElement === el;
+  }
+  function blurAfterProgrammaticFill(el, didFocus) {
+    if (didFocus && document.activeElement === el) el.blur();
   }
   function setNativeValue(el, value) {
     const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
     const desc = Object.getOwnPropertyDescriptor(proto, "value");
     desc?.set?.call(el, value);
   }
-  function applyRule(el, rule, touched2) {
-    if (rule.strategy === "radio") {
-      const anchor = el;
-      const radios = findNearbyRadioGroup(anchor);
-      if (radios.length === 0) return false;
-      for (const r of radios) {
-        const optionText = getRadioLabelText(r);
-        const optionValue = r.value ?? "";
-        if (matchesRadioOption(rule, optionText, optionValue)) {
-          clickRadio(r);
+  function isTextInput(el) {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    return ![
+      "button",
+      "checkbox",
+      "file",
+      "hidden",
+      "image",
+      "password",
+      "radio",
+      "reset",
+      "submit"
+    ].includes(type);
+  }
+  function acceptsTextRule(rule) {
+    return Boolean(rule.value);
+  }
+  function getPreviousSiblingText(el) {
+    let previous = el.previousElementSibling;
+    while (previous) {
+      if (previous instanceof HTMLElement) {
+        if (previous.matches("input, textarea, select, button")) return "";
+        const text = cleanText3((previous.textContent ?? "").replace(/\*/g, " "));
+        if (text) return text;
+      }
+      previous = previous.previousElementSibling;
+    }
+    return "";
+  }
+  function getCandidateText(el) {
+    const id = el.id;
+    if (id) {
+      const safeId = cssEscape(id);
+      const label = document.querySelector(`label[for="${safeId}"]`);
+      if (label?.textContent?.trim()) return cleanText3(label.textContent);
+    }
+    const wrappingLabel = el.closest("label");
+    if (wrappingLabel?.textContent?.trim()) {
+      return cleanText3(wrappingLabel.textContent);
+    }
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel?.trim()) return cleanText3(ariaLabel);
+    const ariaLabelledBy = el.getAttribute("aria-labelledby");
+    if (ariaLabelledBy) {
+      const text = ariaLabelledBy.split(/\s+/).map((id2) => document.getElementById(id2)?.textContent ?? "").join(" ").trim();
+      if (text) return cleanText3(text);
+    }
+    const placeholder = el.getAttribute("placeholder");
+    if (placeholder?.trim()) return cleanText3(placeholder);
+    return getPreviousSiblingText(el);
+  }
+  function textInputConstruct(el) {
+    const questionText = getCandidateText(el);
+    if (!questionText) return null;
+    return {
+      kind: "text",
+      questionText,
+      container: el,
+      elements: [el],
+      isAnswered: () => el.value.trim().length > 0,
+      accepts: acceptsTextRule,
+      fill: (rule, touched2) => {
+        if (touched2?.has(el)) return false;
+        if (el.value === rule.value) return false;
+        if (rule.inputTypes) {
+          const type = (el.getAttribute("type") || "text").toLowerCase();
+          if (!rule.inputTypes.includes(type)) return false;
+        }
+        let didFocus = false;
+        try {
+          setNativeValue(el, rule.value);
+          didFocus = activateAfterProgrammaticFill(el);
+          dispatchEvents(el);
           return true;
+        } finally {
+          blurAfterProgrammaticFill(el, didFocus);
         }
       }
-      return false;
-    }
-    if (rule.strategy === "checkbox") {
-      if (!(el instanceof HTMLInputElement)) return false;
-      if (touched2?.has(el)) return false;
-      const type2 = (el.getAttribute("type") || "text").toLowerCase();
-      if (type2 !== "checkbox") return false;
-      const wantChecked = rule.value.trim().toLowerCase() === "true";
-      if (!wantChecked) return false;
-      if (!el.checked) {
-        el.click();
-        dispatchEvents(el);
-        return true;
+    };
+  }
+  function textareaConstruct(el) {
+    const questionText = getCandidateText(el);
+    if (!questionText) return null;
+    return {
+      kind: "textarea",
+      questionText,
+      container: el,
+      elements: [el],
+      isAnswered: () => el.value.trim().length > 0,
+      accepts: acceptsTextRule,
+      fill: (rule, touched2) => {
+        if (rule.allowTextArea === false) return false;
+        if (touched2?.has(el)) return false;
+        if (el.value === rule.value) return false;
+        let didFocus = false;
+        try {
+          setNativeValue(el, rule.value);
+          didFocus = activateAfterProgrammaticFill(el);
+          dispatchEvents(el);
+          return true;
+        } finally {
+          blurAfterProgrammaticFill(el, didFocus);
+        }
       }
+    };
+  }
+  function recognizeQuestionConstructs(root = document) {
+    const constructs = [];
+    const inputs = Array.from(root.querySelectorAll("input"));
+    for (const input of inputs) {
+      if (!(input instanceof HTMLInputElement)) continue;
+      if (isTextInput(input)) {
+        const construct = textInputConstruct(input);
+        if (construct) constructs.push(construct);
+      }
+    }
+    const textareas = Array.from(root.querySelectorAll("textarea"));
+    for (const textarea of textareas) {
+      if (!(textarea instanceof HTMLTextAreaElement)) continue;
+      const construct = textareaConstruct(textarea);
+      if (construct) constructs.push(construct);
+    }
+    return constructs;
+  }
+
+  // src/radioFill.ts
+  function cleanText4(value) {
+    return value.replace(/\s+/g, " ").trim();
+  }
+  function cleanQuestionText(value) {
+    return cleanText4(value.replace(/\*/g, " "));
+  }
+  function getRadioLabelText(radio) {
+    const ariaLabel = radio.getAttribute("aria-label");
+    if (ariaLabel?.trim()) return cleanText4(ariaLabel);
+    if (radio.id) {
+      const label = radio.ownerDocument.querySelector(
+        `label[for="${cssEscape(radio.id)}"]`
+      );
+      if (label?.textContent?.trim()) return cleanText4(label.textContent);
+    }
+    const wrappingLabel = radio.closest("label");
+    if (wrappingLabel?.textContent?.trim()) {
+      return cleanText4(wrappingLabel.textContent);
+    }
+    return cleanText4(radio.parentElement?.textContent ?? "");
+  }
+  function getPreviousSiblingText2(el) {
+    let previous = el.previousElementSibling;
+    while (previous) {
+      if (previous instanceof HTMLElement) {
+        if (previous.querySelector('input[type="radio"]')) return "";
+        const text = cleanQuestionText(previous.textContent ?? "");
+        if (text) return text;
+      }
+      previous = previous.previousElementSibling;
+    }
+    return "";
+  }
+  function getFieldsetLegendText(radio) {
+    const legend = radio.closest("fieldset")?.querySelector("legend");
+    return cleanQuestionText(legend?.textContent ?? "");
+  }
+  function findRadioFieldEntry(radio) {
+    const radioName = radio.name.trim();
+    let current = radio.parentElement;
+    while (current) {
+      if (current instanceof HTMLDivElement) {
+        const fieldEntryId = current.getAttribute("data-field-entry-id");
+        if (fieldEntryId && radioName && fieldEntryId.includes(radioName)) {
+          return current;
+        }
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+  function getTextBeforeFirstRadio(container) {
+    const parts = [];
+    for (const child of Array.from(container.childNodes)) {
+      if (child instanceof Element && child.querySelector('input[type="radio"]')) {
+        break;
+      }
+      parts.push(child.textContent ?? "");
+    }
+    return cleanQuestionText(parts.join(" "));
+  }
+  function getFieldEntryLabelText(fieldEntry, radio) {
+    const labels = Array.from(fieldEntry.querySelectorAll("label"));
+    for (const label of labels) {
+      if (label.contains(radio)) continue;
+      if (label.querySelector('input[type="radio"]')) continue;
+      const text = cleanQuestionText(label.textContent ?? "");
+      if (text) return text;
+    }
+    return getTextBeforeFirstRadio(fieldEntry);
+  }
+  function getRadioGroupLabelText(radio) {
+    const fieldEntry = findRadioFieldEntry(radio);
+    if (fieldEntry) {
+      const fieldEntryLabel = getFieldEntryLabelText(fieldEntry, radio);
+      console.log("[form-filler] radio field entry label lookup", {
+        radioName: radio.name,
+        fieldEntryId: fieldEntry.getAttribute("data-field-entry-id"),
+        fieldEntryLabel
+      });
+      if (fieldEntryLabel) return fieldEntryLabel;
+    } else {
+      console.log("[form-filler] radio field entry not found", {
+        radioName: radio.name,
+        radioLabel: getRadioLabelText(radio)
+      });
+    }
+    const fieldsetLegend = getFieldsetLegendText(radio);
+    if (fieldsetLegend) return fieldsetLegend;
+    let current = radio.closest("label") ?? radio;
+    for (let i = 0; i < 5 && current; i += 1) {
+      const previousText = getPreviousSiblingText2(current);
+      if (previousText) return previousText;
+      current = current.parentElement;
+    }
+    return "";
+  }
+  function checkFirstRadioButtonWithLabel(labelText, groupLabelText, root = document) {
+    const desiredLabel = cleanText4(labelText).toLowerCase();
+    const desiredGroupLabel = groupLabelText ? cleanQuestionText(groupLabelText).toLowerCase() : "";
+    const radios = Array.from(root.querySelectorAll('input[type="radio"]'));
+    console.log("[form-filler] looking for remembered radio", {
+      labelText,
+      groupLabelText,
+      desiredLabel,
+      desiredGroupLabel,
+      radioCount: radios.length
+    });
+    const radio = radios.find((el) => {
+      if (!(el instanceof HTMLInputElement)) {
+        console.log("[form-filler] skipping radio candidate: not input", { el });
+        return false;
+      }
+      const candidateLabel = getRadioLabelText(el);
+      const candidateGroupLabel = getRadioGroupLabelText(el);
+      const labelMatches = candidateLabel.toLowerCase() === desiredLabel;
+      const groupMatches = !desiredGroupLabel || candidateGroupLabel.toLowerCase() === desiredGroupLabel;
+      console.log("[form-filler] radio candidate", {
+        candidateLabel,
+        candidateGroupLabel,
+        value: el.value,
+        name: el.name,
+        id: el.id,
+        disabled: el.disabled,
+        checked: el.checked,
+        labelMatches,
+        groupMatches
+      });
+      if (el.disabled) return false;
+      if (!labelMatches) return false;
+      if (!desiredGroupLabel) return true;
+      return groupMatches;
+    });
+    if (!radio) {
+      console.log("[form-filler] no matching radio found", {
+        labelText,
+        groupLabelText
+      });
       return false;
     }
-    if (el instanceof HTMLSelectElement) {
-      const desired = rule.value.trim().toLowerCase();
-      const option = Array.from(el.options).find(
-        (o) => o.value.trim().toLowerCase() === desired || o.text.trim().toLowerCase() === desired
-      );
-      if (!option) return false;
-      if (el.value === option.value) return false;
-      el.value = option.value;
-      dispatchEvents(el);
-      return true;
+    if (radio.checked) {
+      console.log("[form-filler] matching radio already checked", {
+        label: getRadioLabelText(radio),
+        groupLabel: getRadioGroupLabelText(radio),
+        value: radio.value,
+        name: radio.name,
+        id: radio.id
+      });
+      return false;
     }
-    if (el instanceof HTMLTextAreaElement) {
-      if (rule.allowTextArea === false) return false;
-      if (touched2?.has(el)) return false;
-      if (el.value === rule.value) return false;
-      setNativeValue(el, rule.value);
-      dispatchEvents(el);
-      return true;
-    }
-    const type = (el.getAttribute("type") || "text").toLowerCase();
-    if (type === "password" || type === "hidden") return false;
-    if (rule.inputTypes && !rule.inputTypes.includes(type)) return false;
-    if (touched2?.has(el)) return false;
-    if (el.value === rule.value) return false;
-    setNativeValue(el, rule.value);
-    dispatchEvents(el);
+    console.log("[form-filler] clicking matching radio", {
+      label: getRadioLabelText(radio),
+      groupLabel: getRadioGroupLabelText(radio),
+      value: radio.value,
+      name: radio.name,
+      id: radio.id
+    });
+    radio.click();
+    radio.dispatchEvent(new Event("input", { bubbles: true }));
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+    console.log("[form-filler] radio click complete", {
+      checked: radio.checked,
+      label: getRadioLabelText(radio),
+      groupLabel: getRadioGroupLabelText(radio),
+      value: radio.value,
+      name: radio.name,
+      id: radio.id
+    });
     return true;
   }
+  function checkRememberedRadioButtons(selections, root = document) {
+    let didCheck = false;
+    const entries = Object.entries(selections);
+    console.log("[form-filler] checking remembered radio selections", {
+      selectionCount: entries.length,
+      selections
+    });
+    for (const [groupLabel, radioLabel] of entries) {
+      console.log("[form-filler] checking remembered radio selection", {
+        groupLabel,
+        radioLabel
+      });
+      didCheck = checkFirstRadioButtonWithLabel(radioLabel, groupLabel, root) || didCheck;
+    }
+    console.log("[form-filler] remembered radio fill finished", {
+      didCheck,
+      selectionCount: entries.length
+    });
+    return didCheck;
+  }
+
+  // src/domFill.ts
   function fillPage(rules, opts) {
     const touched2 = opts?.touched;
     const filled2 = opts?.filled;
-    const els = Array.from(document.querySelectorAll("input, textarea, select"));
-    for (const el of els) {
-      if (!isFillable(el)) continue;
-      if (touched2?.has(el)) continue;
-      if (filled2?.has(el)) continue;
-      if (el instanceof HTMLInputElement) {
-        const type = (el.getAttribute("type") || "text").toLowerCase();
-        if (type === "checkbox" || type === "radio") {
-          if (el.checked) continue;
-        } else {
-          const current = el.value;
-          if (current && current.trim().length > 0) continue;
-        }
-      } else {
-        const current = el.value;
-        if (current && current.trim().length > 0) continue;
-      }
-      const candidateText = getCandidateText(el);
-      if (!candidateText) continue;
-      const rule = pickBestRule(candidateText, rules);
-      if (!rule) continue;
-      const didFill = applyRule(el, rule, touched2);
-      if (didFill) filled2?.add(el);
+    console.log("[form-filler] domFill fired", {
+      hasTouchedSet: Boolean(touched2),
+      hasFilledSet: Boolean(filled2),
+      radioSelections: opts?.radioSelections
+    });
+    if (opts?.radioSelections) {
+      console.log("[form-filler] starting radio fill", {
+        radioSelections: opts.radioSelections
+      });
+      checkRememberedRadioButtons(opts.radioSelections);
+    } else {
+      console.log("[form-filler] skipping radio fill: no remembered selections");
     }
-    const radioGroups = Array.from(
-      document.querySelectorAll(
-        'fieldset, [role="radiogroup"], ul, ol, div, section, form'
-      )
-    ).filter((el) => el.querySelector('input[type="radio"]'));
-    for (const group of radioGroups) {
-      const candidateText = group.textContent ?? "";
-      if (!candidateText.trim()) continue;
-      const rule = pickBestRule(candidateText, rules);
-      if (!rule || rule.strategy !== "radio") continue;
-      const radios = Array.from(
-        group.querySelectorAll('input[type="radio"]')
-      );
-      for (const r of radios) {
-        if (touched2?.has(r)) continue;
-        if (filled2?.has(r)) continue;
-        if (matchesRadioOption(rule, getRadioLabelText(r), r.value ?? "")) {
-          clickRadio(r);
-          filled2?.add(r);
-          break;
-        }
+    for (const construct of recognizeQuestionConstructs()) {
+      try {
+        if (filled2?.has(construct.container)) continue;
+        if (construct.elements.some((el) => touched2?.has(el))) continue;
+        if (construct.isAnswered()) continue;
+        const rule = pickBestRule(construct.questionText, rules);
+        if (!rule) continue;
+        if (!construct.accepts(rule)) continue;
+        const didFill = construct.fill(rule, touched2);
+        if (!didFill) continue;
+        filled2?.add(construct.container);
+        for (const el of construct.elements) filled2?.add(el);
+      } catch (err) {
+        console.warn("Failed to fill form question", {
+          kind: construct.kind,
+          question: construct.questionText,
+          error: err instanceof Error ? err.message : String(err)
+        });
       }
     }
   }
@@ -14100,26 +14566,34 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     );
   }
   async function loadDocumentFromExtension(relativePath, fileName) {
-    const url2 = chrome.runtime.getURL(relativePath);
-    const res = await fetch(url2);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return new File([blob], fileName, {
-      type: blob.type || "application/octet-stream"
-    });
+    try {
+      const url2 = chrome.runtime.getURL(relativePath);
+      const res = await fetch(url2);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return new File([blob], fileName, {
+        type: blob.type || "application/octet-stream"
+      });
+    } catch {
+      return null;
+    }
   }
   async function uploadDocumentToMatchingInput(matchers, relativePath, fileName) {
-    const input = findFileUploader(matchers);
-    if (!input) return false;
-    if (isAlreadyUploaded(input)) return false;
-    const file2 = await loadDocumentFromExtension(relativePath, fileName);
-    if (!file2) return false;
-    const dt = new DataTransfer();
-    dt.items.add(file2);
-    const didSet = setInputFiles(input, dt.files);
-    if (!didSet) return false;
-    dispatchUploadEvents(input);
-    return true;
+    try {
+      const input = findFileUploader(matchers);
+      if (!input) return false;
+      if (isAlreadyUploaded(input)) return false;
+      const file2 = await loadDocumentFromExtension(relativePath, fileName);
+      if (!file2) return false;
+      const dt = new DataTransfer();
+      dt.items.add(file2);
+      const didSet = setInputFiles(input, dt.files);
+      if (!didSet) return false;
+      dispatchUploadEvents(input);
+      return true;
+    } catch {
+      return false;
+    }
   }
   async function uploadResumeFromDocuments() {
     return uploadDocumentToMatchingInput(
@@ -14134,6 +14608,76 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       "documents/cover-letter.pdf",
       "cover-letter.pdf"
     );
+  }
+
+  // src/learnedMemory.ts
+  var ANSWER_MEMORY_KEY = "answerMemory";
+  function getChromeStorage() {
+    function getLastError() {
+      return chrome.runtime?.lastError;
+    }
+    return {
+      async get(key) {
+        return new Promise((resolve, reject) => {
+          try {
+            const maybePromise = chrome.storage.local.get(
+              key,
+              (result) => {
+                const lastError = getLastError();
+                if (lastError) {
+                  reject(lastError);
+                  return;
+                }
+                resolve(result[key]);
+              }
+            );
+            if (maybePromise && typeof maybePromise.then === "function") {
+              void maybePromise.then(
+                (result) => resolve(result[key]),
+                reject
+              );
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+      async set(key, value) {
+        await new Promise((resolve, reject) => {
+          try {
+            const maybePromise = chrome.storage.local.set(
+              { [key]: value },
+              () => {
+                const lastError = getLastError();
+                if (lastError) {
+                  reject(lastError);
+                  return;
+                }
+                resolve();
+              }
+            );
+            if (maybePromise && typeof maybePromise.then === "function") {
+              void maybePromise.then(() => resolve(), reject);
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    };
+  }
+  async function loadAnswerMemory(storage2) {
+    return await storage2.get(ANSWER_MEMORY_KEY) ?? createAnswerMemory();
+  }
+  async function rememberAnswer(observation, storage2 = getChromeStorage()) {
+    const current = await loadAnswerMemory(storage2);
+    const next = recordAnswer(current, observation);
+    await storage2.set(ANSWER_MEMORY_KEY, next);
+    return next;
+  }
+  async function loadLearnedRules(storage2 = getChromeStorage()) {
+    const memory = await loadAnswerMemory(storage2);
+    return buildRulesFromMemory(memory);
   }
 
   // src/rules.ts
@@ -14325,48 +14869,261 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
   };
 
+  // src/settings.ts
+  var AUTO_FILL_ENABLED_KEY = "autoFillEnabled";
+  function createChromeStorageAdapter(chromeApi = chrome) {
+    function getLastError() {
+      return chromeApi.runtime?.lastError;
+    }
+    return {
+      async get(key) {
+        return new Promise((resolve, reject) => {
+          try {
+            const maybePromise = chromeApi.storage.local.get(
+              key,
+              (result) => {
+                const lastError = getLastError();
+                if (lastError) {
+                  reject(lastError);
+                  return;
+                }
+                resolve(result[key]);
+              }
+            );
+            if (maybePromise && typeof maybePromise.then === "function") {
+              void maybePromise.then(
+                (result) => resolve(result[key]),
+                reject
+              );
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+      async set(key, value) {
+        await new Promise((resolve, reject) => {
+          try {
+            const maybePromise = chromeApi.storage.local.set(
+              { [key]: value },
+              () => {
+                const lastError = getLastError();
+                if (lastError) {
+                  reject(lastError);
+                  return;
+                }
+                resolve();
+              }
+            );
+            if (maybePromise && typeof maybePromise.then === "function") {
+              void maybePromise.then(() => resolve(), reject);
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    };
+  }
+  async function loadAutoFillEnabled(storage2 = createChromeStorageAdapter()) {
+    return await storage2.get(AUTO_FILL_ENABLED_KEY) ?? true;
+  }
+
   // src/content.ts
+  var REMEMBERED_RADIO_LABEL_KEY = "rememberedRadioLabel";
+  var REMEMBERED_RADIO_GROUP_LABEL_KEY = "rememberedRadioGroupLabel";
+  var REMEMBERED_RADIO_SELECTIONS_KEY = "rememberedRadioSelections";
+  var storage = createChromeStorageAdapter();
   var touched = /* @__PURE__ */ new WeakSet();
   var filled = /* @__PURE__ */ new WeakSet();
   var isFilling = false;
+  var learningQueue = Promise.resolve();
+  var radioLabelQueue = Promise.resolve();
+  function getFieldAnswer(field) {
+    if (field instanceof HTMLSelectElement) {
+      return field.selectedOptions[0]?.text.trim() || field.value.trim();
+    }
+    if (field instanceof HTMLTextAreaElement) return field.value.trim();
+    const type = (field.getAttribute("type") || "text").toLowerCase();
+    if (type === "checkbox") return field.checked ? "true" : "";
+    if (type === "radio") return field.checked ? field.value.trim() : "";
+    return field.value.trim();
+  }
+  function queueRememberObservation(question, answer, strategy) {
+    if (!question || !answer) return;
+    learningQueue = learningQueue.then(async () => {
+      await rememberAnswer({ question, answer, strategy });
+    }).catch((err) => {
+      console.warn("Failed to remember form answer", err);
+    });
+  }
+  function queueRememberFieldAnswer(field) {
+    queueRememberObservation(getCandidateText(field), getFieldAnswer(field));
+  }
+  function queueRememberRadioLabel(radio) {
+    const label = getRadioLabelText(radio);
+    if (!label) {
+      console.log("[form-filler] radio selection not remembered: missing label", {
+        value: radio.value,
+        name: radio.name,
+        id: radio.id
+      });
+      return;
+    }
+    const groupLabel = getRadioGroupLabelText(radio);
+    if (!groupLabel) {
+      console.log(
+        "[form-filler] radio selection not remembered: missing group label",
+        {
+          label,
+          value: radio.value,
+          name: radio.name,
+          id: radio.id
+        }
+      );
+      return;
+    }
+    console.log("[form-filler] queueing radio selection memory", {
+      groupLabel,
+      label,
+      value: radio.value,
+      name: radio.name,
+      id: radio.id
+    });
+    radioLabelQueue = radioLabelQueue.then(async () => {
+      const selections = await storage.get(
+        REMEMBERED_RADIO_SELECTIONS_KEY
+      ) ?? {};
+      console.log("[form-filler] loaded radio selections before save", {
+        selections
+      });
+      const nextSelections = {
+        ...selections,
+        [groupLabel]: label
+      };
+      console.log("[form-filler] committing radio selection to memory", {
+        storageKey: REMEMBERED_RADIO_SELECTIONS_KEY,
+        groupLabel,
+        radioLabel: label,
+        previousSelections: selections,
+        nextSelections
+      });
+      await storage.set(REMEMBERED_RADIO_SELECTIONS_KEY, nextSelections);
+      console.log("[form-filler] saved radio selections", {
+        storageKey: REMEMBERED_RADIO_SELECTIONS_KEY,
+        selections: nextSelections
+      });
+    }).catch((err) => {
+      console.warn("Failed to remember radio selection", err);
+    });
+  }
   function markTouched(e) {
     if (!e.isTrusted) return;
     if (isFilling) return;
     const t = e.target;
+    if (t instanceof HTMLInputElement && t.type.toLowerCase() === "radio") {
+      touched.add(t);
+      if ((e.type === "input" || e.type === "change") && t.checked) {
+        queueRememberRadioLabel(t);
+      }
+      return;
+    }
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) {
       touched.add(t);
+      if (e.type === "input" || e.type === "change") {
+        queueRememberFieldAnswer(t);
+      }
+      return;
+    }
+    if (e.type === "click" && t instanceof Element) {
+      const observation = getButtonPressObservation(t);
+      if (!observation) return;
+      touched.add(observation.choice);
+      queueRememberObservation(
+        observation.question,
+        observation.answer,
+        observation.strategy
+      );
     }
   }
   document.addEventListener("input", markTouched, true);
   document.addEventListener("change", markTouched, true);
   document.addEventListener("click", markTouched, true);
-  function run() {
+  async function run() {
+    const [
+      learnedRules,
+      rememberedRadioSelections,
+      rememberedRadioLabel,
+      rememberedRadioGroupLabel
+    ] = await Promise.all([
+      loadLearnedRules().catch((err) => {
+        console.warn("Failed to load learned form rules", err);
+        return {};
+      }),
+      storage.get(
+        REMEMBERED_RADIO_SELECTIONS_KEY
+      ).catch((err) => {
+        console.warn("Failed to load remembered radio selections", err);
+        return void 0;
+      }),
+      storage.get(REMEMBERED_RADIO_LABEL_KEY).catch((err) => {
+        console.warn("Failed to load remembered radio label", err);
+        return void 0;
+      }),
+      storage.get(REMEMBERED_RADIO_GROUP_LABEL_KEY).catch((err) => {
+        console.warn("Failed to load remembered radio group label", err);
+        return void 0;
+      })
+    ]);
+    const radioSelections = rememberedRadioSelections ?? (rememberedRadioGroupLabel && rememberedRadioLabel ? { [rememberedRadioGroupLabel]: rememberedRadioLabel } : void 0);
+    console.log("[form-filler] loaded fill inputs", {
+      rememberedRadioSelections,
+      rememberedRadioLabel,
+      rememberedRadioGroupLabel,
+      radioSelections
+    });
     isFilling = true;
     try {
-      fillPage(RULES, { touched, filled });
+      fillPage(learnedRules, {
+        touched,
+        filled,
+        radioSelections
+      });
+      fillPage(RULES, {
+        touched,
+        filled,
+        radioSelections
+      });
       void uploadResumeFromDocuments();
       void uploadCoverLetterFromDocuments();
     } finally {
       isFilling = false;
     }
   }
+  async function runIfAutoFillEnabled() {
+    const enabled = await loadAutoFillEnabled().catch((err) => {
+      console.warn("Failed to load auto-fill setting", err);
+      return true;
+    });
+    if (enabled) await run();
+  }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
-      run();
-      setTimeout(run, 600);
+      void runIfAutoFillEnabled();
+      setTimeout(() => void runIfAutoFillEnabled(), 600);
     });
   } else {
-    run();
-    setTimeout(run, 600);
+    void runIfAutoFillEnabled();
+    setTimeout(() => void runIfAutoFillEnabled(), 600);
   }
   var scheduled;
   var observer = new MutationObserver(() => {
     if (isFilling) return;
     if (scheduled) clearTimeout(scheduled);
-    scheduled = window.setTimeout(run, 200);
+    scheduled = window.setTimeout(runIfAutoFillEnabled, 200);
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === "RUN_FILL") run();
+    if (msg?.type === "RUN_FILL") void run();
   });
 })();

@@ -1,73 +1,259 @@
-import { FillRule } from "@form-filler/shared";
 import { cssEscape } from "../utils/normalization";
 
-function normalizeToken(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+export type RememberedRadioSelections = Record<string, string>;
+
+function cleanText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
-export function matchesRadioOption(
-  rule: FillRule,
-  optionText: string,
-  optionValue: string,
-): boolean {
-  const want = normalizeToken(rule.value);
-  const wantSet = new Set([want]);
-
-  if (rule.radioValues) {
-    for (const v of rule.radioValues) wantSet.add(normalizeToken(v));
-  }
-
-  return (
-    wantSet.has(normalizeToken(optionText)) ||
-    wantSet.has(normalizeToken(optionValue))
-  );
+function cleanQuestionText(value: string): string {
+  return cleanText(value.replace(/\*/g, " "));
 }
 
 export function getRadioLabelText(radio: HTMLInputElement): string {
-  const id = radio.id;
-  if (id) {
-    const label = document.querySelector(`label[for="${cssEscape(id)}"]`);
-    const t = label?.textContent?.trim();
-    if (t) return t;
+  const ariaLabel = radio.getAttribute("aria-label");
+  if (ariaLabel?.trim()) return cleanText(ariaLabel);
+
+  if (radio.id) {
+    const label = radio.ownerDocument.querySelector(
+      `label[for="${cssEscape(radio.id)}"]`,
+    );
+    if (label?.textContent?.trim()) return cleanText(label.textContent);
   }
 
   const wrappingLabel = radio.closest("label");
-  const t2 = wrappingLabel?.textContent?.trim();
-  if (t2) return t2;
-
-  // fallback: nearby text node or parent container text
-  const parentText = radio.parentElement?.textContent?.trim();
-  return parentText ?? "";
-}
-
-/**
- * Find radio inputs that belong to the same question container as `el`.
- * This handles common structures like:
- *   <div>Are you a veteran?</div>
- *   <ul><li><input type="radio">Yes</li> ...</ul>
- */
-export function findNearbyRadioGroup(el: HTMLElement): HTMLInputElement[] {
-  // Search upward a few levels for a container that has radios
-  let cur: HTMLElement | null = el;
-  for (let i = 0; i < 5 && cur; i++) {
-    const radios = Array.from(
-      cur.querySelectorAll('input[type="radio"]'),
-    ) as HTMLInputElement[];
-    if (radios.length > 0) return radios;
-    cur = cur.parentElement;
+  if (wrappingLabel?.textContent?.trim()) {
+    return cleanText(wrappingLabel.textContent);
   }
 
-  // Fallback: if the element is itself a question label, try sibling search
-  const parent = el.parentElement;
-  if (!parent) return [];
-  return Array.from(
-    parent.querySelectorAll('input[type="radio"]'),
-  ) as HTMLInputElement[];
+  return cleanText(radio.parentElement?.textContent ?? "");
 }
 
-export function clickRadio(radio: HTMLInputElement) {
-  if (radio.disabled) return;
+function getPreviousSiblingText(el: Element): string {
+  let previous = el.previousElementSibling;
+
+  while (previous) {
+    if (previous instanceof HTMLElement) {
+      if (previous.querySelector('input[type="radio"]')) return "";
+
+      const text = cleanQuestionText(previous.textContent ?? "");
+      if (text) return text;
+    }
+
+    previous = previous.previousElementSibling;
+  }
+
+  return "";
+}
+
+function getFieldsetLegendText(radio: HTMLInputElement): string {
+  const legend = radio.closest("fieldset")?.querySelector("legend");
+  return cleanQuestionText(legend?.textContent ?? "");
+}
+
+function findRadioFieldEntry(radio: HTMLInputElement): HTMLElement | null {
+  const radioName = radio.name.trim();
+  let current = radio.parentElement;
+
+  while (current) {
+    if (current instanceof HTMLDivElement) {
+      const fieldEntryId = current.getAttribute("data-field-entry-id");
+      if (fieldEntryId && radioName && fieldEntryId.includes(radioName)) {
+        return current;
+      }
+    }
+
+    current = current.parentElement;
+  }
+
+  return null;
+}
+
+function getTextBeforeFirstRadio(container: HTMLElement): string {
+  const parts: string[] = [];
+
+  for (const child of Array.from(container.childNodes)) {
+    if (
+      child instanceof Element &&
+      child.querySelector('input[type="radio"]')
+    ) {
+      break;
+    }
+
+    parts.push(child.textContent ?? "");
+  }
+
+  return cleanQuestionText(parts.join(" "));
+}
+
+function getFieldEntryLabelText(
+  fieldEntry: HTMLElement,
+  radio: HTMLInputElement,
+): string {
+  const labels = Array.from(fieldEntry.querySelectorAll("label"));
+
+  for (const label of labels) {
+    if (label.contains(radio)) continue;
+    if (label.querySelector('input[type="radio"]')) continue;
+
+    const text = cleanQuestionText(label.textContent ?? "");
+    if (text) return text;
+  }
+
+  return getTextBeforeFirstRadio(fieldEntry);
+}
+
+export function getRadioGroupLabelText(radio: HTMLInputElement): string {
+  const fieldEntry = findRadioFieldEntry(radio);
+  if (fieldEntry) {
+    const fieldEntryLabel = getFieldEntryLabelText(fieldEntry, radio);
+    console.log("[form-filler] radio field entry label lookup", {
+      radioName: radio.name,
+      fieldEntryId: fieldEntry.getAttribute("data-field-entry-id"),
+      fieldEntryLabel,
+    });
+    if (fieldEntryLabel) return fieldEntryLabel;
+  } else {
+    console.log("[form-filler] radio field entry not found", {
+      radioName: radio.name,
+      radioLabel: getRadioLabelText(radio),
+    });
+  }
+
+  const fieldsetLegend = getFieldsetLegendText(radio);
+  if (fieldsetLegend) return fieldsetLegend;
+
+  let current: Element | null = radio.closest("label") ?? radio;
+
+  for (let i = 0; i < 5 && current; i += 1) {
+    const previousText = getPreviousSiblingText(current);
+    if (previousText) return previousText;
+
+    current = current.parentElement;
+  }
+
+  return "";
+}
+
+export function checkFirstRadioButtonWithLabel(
+  labelText: string,
+  groupLabelText?: string,
+  root: ParentNode = document,
+): boolean {
+  const desiredLabel = cleanText(labelText).toLowerCase();
+  const desiredGroupLabel = groupLabelText
+    ? cleanQuestionText(groupLabelText).toLowerCase()
+    : "";
+  const radios = Array.from(root.querySelectorAll('input[type="radio"]'));
+
+  console.log("[form-filler] looking for remembered radio", {
+    labelText,
+    groupLabelText,
+    desiredLabel,
+    desiredGroupLabel,
+    radioCount: radios.length,
+  });
+
+  const radio = radios.find((el): el is HTMLInputElement => {
+    if (!(el instanceof HTMLInputElement)) {
+      console.log("[form-filler] skipping radio candidate: not input", { el });
+      return false;
+    }
+
+    const candidateLabel = getRadioLabelText(el);
+    const candidateGroupLabel = getRadioGroupLabelText(el);
+    const labelMatches = candidateLabel.toLowerCase() === desiredLabel;
+    const groupMatches =
+      !desiredGroupLabel ||
+      candidateGroupLabel.toLowerCase() === desiredGroupLabel;
+
+    console.log("[form-filler] radio candidate", {
+      candidateLabel,
+      candidateGroupLabel,
+      value: el.value,
+      name: el.name,
+      id: el.id,
+      disabled: el.disabled,
+      checked: el.checked,
+      labelMatches,
+      groupMatches,
+    });
+
+    if (el.disabled) return false;
+    if (!labelMatches) return false;
+    if (!desiredGroupLabel) return true;
+
+    return groupMatches;
+  });
+
+  if (!radio) {
+    console.log("[form-filler] no matching radio found", {
+      labelText,
+      groupLabelText,
+    });
+    return false;
+  }
+
+  if (radio.checked) {
+    console.log("[form-filler] matching radio already checked", {
+      label: getRadioLabelText(radio),
+      groupLabel: getRadioGroupLabelText(radio),
+      value: radio.value,
+      name: radio.name,
+      id: radio.id,
+    });
+    return false;
+  }
+
+  console.log("[form-filler] clicking matching radio", {
+    label: getRadioLabelText(radio),
+    groupLabel: getRadioGroupLabelText(radio),
+    value: radio.value,
+    name: radio.name,
+    id: radio.id,
+  });
+
   radio.click();
   radio.dispatchEvent(new Event("input", { bubbles: true }));
   radio.dispatchEvent(new Event("change", { bubbles: true }));
+
+  console.log("[form-filler] radio click complete", {
+    checked: radio.checked,
+    label: getRadioLabelText(radio),
+    groupLabel: getRadioGroupLabelText(radio),
+    value: radio.value,
+    name: radio.name,
+    id: radio.id,
+  });
+
+  return true;
+}
+
+export function checkRememberedRadioButtons(
+  selections: RememberedRadioSelections,
+  root: ParentNode = document,
+): boolean {
+  let didCheck = false;
+  const entries = Object.entries(selections);
+
+  console.log("[form-filler] checking remembered radio selections", {
+    selectionCount: entries.length,
+    selections,
+  });
+
+  for (const [groupLabel, radioLabel] of entries) {
+    console.log("[form-filler] checking remembered radio selection", {
+      groupLabel,
+      radioLabel,
+    });
+    didCheck =
+      checkFirstRadioButtonWithLabel(radioLabel, groupLabel, root) || didCheck;
+  }
+
+  console.log("[form-filler] remembered radio fill finished", {
+    didCheck,
+    selectionCount: entries.length,
+  });
+
+  return didCheck;
 }

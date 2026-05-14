@@ -2,9 +2,13 @@
   "manifest_version": 3,
   "name": "Form Filler (Dev)",
   "version": "0.0.0",
-  "description": "Fills common form fields based on keyword rules.",
-  "permissions": ["activeTab"],
+  "description": "Fills common form fields from learned and shared question aliases.",
+  "permissions": ["activeTab", "storage"],
   "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Form Filler",
+    "default_popup": "popup.html"
+  },
   "web_accessible_resources": [
     {
       "resources": ["documents/*"],
