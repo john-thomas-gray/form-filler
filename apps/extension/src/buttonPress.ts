@@ -1,4 +1,6 @@
 import type { FillRule } from "@form-filler/shared";
+import { cssEscape } from "../utils/normalization";
+import { getRadioGroupLabelText, getRadioLabelText } from "./radioFill";
 
 const BUTTON_CHOICE_SELECTOR = [
   "button",
@@ -30,7 +32,7 @@ export type RememberedYesNoSelections = Record<string, YesNoAnswer>;
 export type YesNoCheckboxObservation = {
   groupLabel: string;
   answer: YesNoAnswer;
-  choice: HTMLButtonElement;
+  choice: HTMLElement;
   container: HTMLElement;
 };
 
@@ -40,6 +42,13 @@ type YesNoCheckboxGroup = {
   groupLabel: string;
   yesButton: HTMLButtonElement;
   noButton: HTMLButtonElement;
+};
+
+type YesNoRadioGroup = {
+  container: HTMLElement;
+  groupLabel: string;
+  yesRadio: HTMLInputElement;
+  noRadio: HTMLInputElement;
 };
 
 function cleanText(value: string): string {
@@ -331,6 +340,22 @@ function buildYesNoSelectionLookup(
   return lookup;
 }
 
+function getRadioAnswer(radio: HTMLInputElement): YesNoAnswer | null {
+  return getYesNoAnswer(getRadioLabelText(radio));
+}
+
+function findRadioLabel(radio: HTMLInputElement): HTMLElement | null {
+  if (radio.id) {
+    const label = radio.ownerDocument.querySelector(
+      `label[for="${cssEscape(radio.id)}"]`,
+    );
+    if (label instanceof HTMLElement) return label;
+  }
+
+  const wrappingLabel = radio.closest("label");
+  return wrappingLabel instanceof HTMLElement ? wrappingLabel : null;
+}
+
 function getYesNoState(
   container: HTMLElement,
   targetButton: HTMLButtonElement,
@@ -416,6 +441,95 @@ export function getYesNoCheckboxObservation(
     groupLabel,
     answer,
     choice: button,
+    container,
+  };
+}
+
+function findNearestYesNoRadioContainer(
+  radio: HTMLInputElement,
+): HTMLElement | null {
+  let current = radio.parentElement;
+  let depth = 0;
+
+  while (current) {
+    if (current instanceof HTMLElement) {
+      const radios = Array.from(current.querySelectorAll('input[type="radio"]'))
+        .filter((input): input is HTMLInputElement => input instanceof HTMLInputElement);
+      const yesRadio = radios.find((candidate) => getRadioAnswer(candidate) === "Yes");
+      const noRadio = radios.find((candidate) => getRadioAnswer(candidate) === "No");
+
+      console.log("[form-filler] yes/no radio ancestor scan", {
+        depth,
+        tagName: current.tagName,
+        text: cleanText(current.textContent ?? ""),
+        radioCount: radios.length,
+        hasYesRadio: Boolean(yesRadio),
+        hasNoRadio: Boolean(noRadio),
+      });
+
+      if (yesRadio && noRadio) return current;
+    }
+
+    current = current.parentElement;
+    depth += 1;
+  }
+
+  console.log("[form-filler] yes/no radio ancestor scan exhausted", {
+    radioId: radio.id,
+    radioName: radio.name,
+    radioLabel: getRadioLabelText(radio),
+  });
+  return null;
+}
+
+export function getYesNoRadioObservation(
+  target: EventTarget | null,
+): YesNoCheckboxObservation | null {
+  if (!(target instanceof Element)) return null;
+
+  const radio = target.closest('input[type="radio"]');
+  if (!(radio instanceof HTMLInputElement)) return null;
+
+  const answer = getRadioAnswer(radio);
+  console.log("[form-filler] yes/no radio observation candidate", {
+    radioId: radio.id,
+    radioName: radio.name,
+    radioLabel: getRadioLabelText(radio),
+    answer,
+    checked: radio.checked,
+    disabled: radio.disabled,
+  });
+
+  if (!answer || radio.disabled) return null;
+
+  const container = findNearestYesNoRadioContainer(radio);
+  if (!container) return null;
+
+  const groupLabel = getRadioGroupLabelText(radio);
+  if (!groupLabel) {
+    console.log("[form-filler] yes/no radio not remembered: missing group label", {
+      answer,
+      radioId: radio.id,
+      radioName: radio.name,
+      radioLabel: getRadioLabelText(radio),
+      containerText: cleanText(container.textContent ?? ""),
+    });
+    return null;
+  }
+
+  console.log("[form-filler] yes/no radio observation ready", {
+    groupLabel,
+    answer,
+    radioId: radio.id,
+    radioName: radio.name,
+    radioLabel: getRadioLabelText(radio),
+    containerText: cleanText(container.textContent ?? ""),
+  });
+
+  return {
+    groupLabel,
+    answer,
+    choice: radio,
     container,
   };
 }
@@ -508,22 +622,134 @@ function findYesNoCheckboxGroups(
   return groups;
 }
 
+function findYesNoRadioGroups(
+  root: ParentNode = document,
+): YesNoRadioGroup[] {
+  const radios = Array.from(root.querySelectorAll('input[type="radio"]'));
+  const seenContainers = new Set<HTMLElement>();
+  const groups: YesNoRadioGroup[] = [];
+
+  console.log("[form-filler] scanning page yes/no radio groups", {
+    radioCount: radios.length,
+  });
+
+  for (const radio of radios) {
+    if (!(radio instanceof HTMLInputElement)) continue;
+    if (!getRadioAnswer(radio)) continue;
+
+    const container = findNearestYesNoRadioContainer(radio);
+    if (!container) continue;
+    if (seenContainers.has(container)) continue;
+
+    const groupRadios = Array.from(container.querySelectorAll('input[type="radio"]'))
+      .filter((input): input is HTMLInputElement => input instanceof HTMLInputElement);
+    const yesRadio = groupRadios.find((candidate) => getRadioAnswer(candidate) === "Yes");
+    const noRadio = groupRadios.find((candidate) => getRadioAnswer(candidate) === "No");
+    if (!yesRadio || !noRadio) continue;
+
+    const groupLabel = getRadioGroupLabelText(yesRadio);
+    seenContainers.add(container);
+
+    console.log("[form-filler] page yes/no radio group", {
+      groupLabel,
+      yesRadioId: yesRadio.id,
+      yesRadioName: yesRadio.name,
+      yesChecked: yesRadio.checked,
+      noRadioId: noRadio.id,
+      noRadioName: noRadio.name,
+      noChecked: noRadio.checked,
+      containerText: cleanText(container.textContent ?? ""),
+    });
+
+    if (!groupLabel) continue;
+
+    groups.push({
+      container,
+      groupLabel,
+      yesRadio,
+      noRadio,
+    });
+  }
+
+  return groups;
+}
+
+function clickYesNoRadio(
+  radio: HTMLInputElement,
+  group: YesNoRadioGroup,
+  answer: YesNoAnswer,
+  filled?: WeakSet<Element>,
+): boolean {
+  if (radio.disabled) {
+    console.log("[form-filler] skipping yes/no radio group: target disabled", {
+      groupLabel: group.groupLabel,
+      answer,
+      radioId: radio.id,
+      radioName: radio.name,
+    });
+    return false;
+  }
+
+  if (radio.checked) {
+    console.log("[form-filler] matching yes/no radio already checked", {
+      groupLabel: group.groupLabel,
+      answer,
+      radioId: radio.id,
+      radioName: radio.name,
+    });
+    filled?.add(group.container);
+    filled?.add(radio);
+    return false;
+  }
+
+  const label = findRadioLabel(radio);
+  console.log("[form-filler] clicking remembered yes/no radio", {
+    groupLabel: group.groupLabel,
+    answer,
+    radioId: radio.id,
+    radioName: radio.name,
+    radioLabel: getRadioLabelText(radio),
+    hasLabel: Boolean(label),
+    containerText: cleanText(group.container.textContent ?? ""),
+  });
+
+  (label ?? radio).click();
+  radio.dispatchEvent(new Event("input", { bubbles: true }));
+  radio.dispatchEvent(new Event("change", { bubbles: true }));
+  filled?.add(group.container);
+  filled?.add(radio);
+  if (label) filled?.add(label);
+
+  console.log("[form-filler] remembered yes/no radio click complete", {
+    groupLabel: group.groupLabel,
+    answer,
+    checked: radio.checked,
+    radioId: radio.id,
+    radioName: radio.name,
+    containerMarkedFilled: filled?.has(group.container),
+    radioMarkedFilled: filled?.has(radio),
+  });
+  return true;
+}
+
 export function pressRememberedYesNoCheckboxButtons(
   selections: RememberedYesNoSelections,
   root: ParentNode = document,
   filled?: WeakSet<Element>,
 ): boolean {
   const lookup = buildYesNoSelectionLookup(selections);
-  const groups = findYesNoCheckboxGroups(root);
+  const checkboxGroups = findYesNoCheckboxGroups(root);
+  const radioGroups = findYesNoRadioGroups(root);
 
-  console.log("[form-filler] starting remembered yes/no checkbox fill", {
+  console.log("[form-filler] starting remembered yes/no fill", {
     selectionCount: lookup.size,
-    pageGroupCount: groups.length,
+    pageCheckboxGroupCount: checkboxGroups.length,
+    pageRadioGroupCount: radioGroups.length,
     selections,
   });
 
   let didFill = false;
-  for (const group of groups) {
+  for (const group of checkboxGroups) {
     const answer = lookup.get(normalizeLabelKey(group.groupLabel));
 
     console.log("[form-filler] yes/no page label lookup", {
@@ -579,10 +805,39 @@ export function pressRememberedYesNoCheckboxButtons(
     });
   }
 
-  console.log("[form-filler] remembered yes/no checkbox fill complete", {
+  for (const group of radioGroups) {
+    const answer = lookup.get(normalizeLabelKey(group.groupLabel));
+
+    console.log("[form-filler] yes/no radio page label lookup", {
+      groupLabel: group.groupLabel,
+      hasRememberedSelection: Boolean(answer),
+      answer,
+      yesRadioId: group.yesRadio.id,
+      yesChecked: group.yesRadio.checked,
+      noRadioId: group.noRadio.id,
+      noChecked: group.noRadio.checked,
+    });
+
+    if (!answer) continue;
+
+    if (filled?.has(group.container)) {
+      console.log("[form-filler] skipping yes/no radio group: already filled", {
+        groupLabel: group.groupLabel,
+        answer,
+        containerText: cleanText(group.container.textContent ?? ""),
+      });
+      continue;
+    }
+
+    const radio = answer === "Yes" ? group.yesRadio : group.noRadio;
+    didFill = clickYesNoRadio(radio, group, answer, filled) || didFill;
+  }
+
+  console.log("[form-filler] remembered yes/no fill complete", {
     didFill,
     selectionCount: lookup.size,
-    pageGroupCount: groups.length,
+    pageCheckboxGroupCount: checkboxGroups.length,
+    pageRadioGroupCount: radioGroups.length,
   });
   return didFill;
 }

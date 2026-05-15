@@ -141,7 +141,7 @@ export function getRadioGroupLabelText(radio: HTMLInputElement): string {
 
   let current: Element | null = radio.closest("label") ?? radio;
 
-  for (let i = 0; i < 5 && current; i += 1) {
+  for (let i = 0; i < 10 && current; i += 1) {
     const previousText = getPreviousSiblingText(current);
     if (previousText) return previousText;
 

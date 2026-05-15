@@ -1,10 +1,18 @@
 import type { FillRule } from "@form-filler/shared";
 import { cssEscape } from "../utils/normalization";
+import {
+  checkboxGroupAcceptsRule,
+  checkCheckboxChoiceGroup,
+  findCheckboxChoiceGroups,
+  isCheckboxChoiceGroupAnswered,
+} from "./checkboxFill";
 import { isListboxComboboxInput } from "./listboxFill";
 
 export type QuestionConstructKind =
   | "text"
-  | "textarea";
+  | "textarea"
+  | "select"
+  | "checkbox";
 
 export type QuestionConstructDefinition = {
   kind: QuestionConstructKind;
@@ -29,6 +37,14 @@ export const QUESTION_CONSTRUCTS: QuestionConstructDefinition[] = [
   {
     kind: "textarea",
     description: "Multi-line freeform text field.",
+  },
+  {
+    kind: "select",
+    description: "Native select menu with label or nearby prompt text.",
+  },
+  {
+    kind: "checkbox",
+    description: "Native checkbox choice group with label or nearby prompt text.",
   },
 ];
 
@@ -87,6 +103,14 @@ function blurAfterProgrammaticFill(el: HTMLElement, didFocus: boolean) {
   if (didFocus && document.activeElement === el) el.blur();
 }
 
+export function focusAndBlurTextControl(
+  el: HTMLInputElement | HTMLTextAreaElement,
+) {
+  if (el.ownerDocument.activeElement === el) el.blur();
+  focusForProgrammaticFill(el);
+  if (el.ownerDocument.activeElement === el) el.blur();
+}
+
 function setNativeValue(
   el: HTMLInputElement | HTMLTextAreaElement,
   value: string,
@@ -97,6 +121,14 @@ function setNativeValue(
       : HTMLTextAreaElement.prototype;
 
   const desc = Object.getOwnPropertyDescriptor(proto, "value");
+  desc?.set?.call(el, value);
+}
+
+function setNativeSelectValue(el: HTMLSelectElement, value: string) {
+  const desc = Object.getOwnPropertyDescriptor(
+    HTMLSelectElement.prototype,
+    "value",
+  );
   desc?.set?.call(el, value);
 }
 
@@ -122,12 +154,134 @@ function acceptsTextRule(rule: FillRule): boolean {
   return Boolean(rule.value);
 }
 
+function acceptsSelectRule(rule: FillRule): boolean {
+  return Boolean(rule.value) && (!rule.strategy || rule.strategy === "select");
+}
+
+function normalizeSelectionText(value: string): string {
+  return cleanText(value).toLowerCase();
+}
+
+function normalizeLooseSelectionText(value: string): string {
+  return normalizeSelectionText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeCompactSelectionText(value: string): string {
+  return normalizeLooseSelectionText(value).replace(/[^a-z0-9]/g, "");
+}
+
+function getOptionText(option: HTMLOptionElement): string {
+  const text = cleanText(option.textContent ?? "");
+  return text || cleanText(option.label ?? "");
+}
+
+function scoreSelectOptionText(optionText: string, desired: string): number {
+  const desiredText = normalizeSelectionText(desired);
+  const looseDesiredText = normalizeLooseSelectionText(desired);
+  const compactDesiredText = normalizeCompactSelectionText(desired);
+  const normalizedOptionText = normalizeSelectionText(optionText);
+  const looseOptionText = normalizeLooseSelectionText(optionText);
+  const compactOptionText = normalizeCompactSelectionText(optionText);
+
+  if (!compactDesiredText || !compactOptionText) return 0;
+
+  if (normalizedOptionText === desiredText) return 10_000;
+  if (looseOptionText === looseDesiredText) return 9_000;
+  if (compactOptionText === compactDesiredText) return 8_000;
+
+  if (
+    compactDesiredText.length >= 3 &&
+    compactOptionText.includes(compactDesiredText)
+  ) {
+    return 7_000 + compactDesiredText.length;
+  }
+
+  if (
+    compactOptionText.length >= 3 &&
+    compactDesiredText.includes(compactOptionText)
+  ) {
+    const startsDesired = compactDesiredText.startsWith(compactOptionText);
+    return 5_000 + (startsDesired ? 500 : 0) + compactOptionText.length;
+  }
+
+  return 0;
+}
+
+function scoreSelectOption(
+  option: HTMLOptionElement,
+  desired: string,
+): number {
+  return Math.max(
+    scoreSelectOptionText(getOptionText(option), desired),
+    scoreSelectOptionText(option.value, desired),
+  );
+}
+
+function findSelectOptionByRuleValue(
+  el: HTMLSelectElement,
+  value: string,
+): HTMLOptionElement | null {
+  const options = Array.from(el.options).filter((option) => !option.disabled);
+  let bestOption: HTMLOptionElement | null = null;
+  let bestScore = 0;
+
+  for (const option of options) {
+    const score = scoreSelectOption(option, value);
+    if (score > bestScore) {
+      bestScore = score;
+      bestOption = option;
+    }
+  }
+
+  return bestOption;
+}
+
+function isSelectAnswered(el: HTMLSelectElement): boolean {
+  if (el.multiple) {
+    return Array.from(el.selectedOptions).some((option) =>
+      option.value.trim().length > 0,
+    );
+  }
+
+  const selectedOption = el.selectedOptions[0];
+  if (!selectedOption) return false;
+  if (selectedOption.value.trim().length === 0) return false;
+  if (selectedOption.defaultSelected) return true;
+
+  return el.selectedIndex > 0;
+}
+
+const CONTROL_SELECTOR =
+  "input, textarea, select, button, [role='button'], [role='listbox'], [role='option']";
+const QUESTION_CONTROL_SELECTOR = "input:not([type='hidden']), textarea, select";
+const MAX_LABEL_ANCESTOR_DEPTH = 7;
+
+function getTextWithoutControls(element: HTMLElement): string {
+  const clone = element.cloneNode(true);
+  if (!(clone instanceof HTMLElement)) {
+    return cleanText(element.textContent ?? "");
+  }
+
+  for (const control of Array.from(clone.querySelectorAll(CONTROL_SELECTOR))) {
+    control.remove();
+  }
+
+  return cleanText(clone.textContent ?? "");
+}
+
+function containsNestedControl(el: HTMLElement): boolean {
+  return Boolean(el.querySelector(CONTROL_SELECTOR));
+}
+
 function getPreviousSiblingText(el: Element): string {
   let previous = el.previousElementSibling;
 
   while (previous) {
     if (previous instanceof HTMLElement) {
       if (previous.matches("input, textarea, select, button")) return "";
+      if (containsNestedControl(previous)) return "";
 
       const text = cleanText((previous.textContent ?? "").replace(/\*/g, " "));
       if (text) return text;
@@ -139,13 +293,69 @@ function getPreviousSiblingText(el: Element): string {
   return "";
 }
 
+function getTextBeforeControl(container: HTMLElement, control: HTMLElement): string {
+  const parts: string[] = [];
+
+  for (const child of Array.from(container.childNodes)) {
+    if (child instanceof Element && child.contains(control)) break;
+
+    if (child instanceof HTMLElement) {
+      if (child.matches(CONTROL_SELECTOR) || containsNestedControl(child)) {
+        continue;
+      }
+      parts.push(getTextWithoutControls(child));
+    } else {
+      parts.push(child.textContent ?? "");
+    }
+  }
+
+  return cleanText(parts.join(" ").replace(/\*/g, " "));
+}
+
+function containsOnlyCandidateTextControl(
+  container: HTMLElement,
+  control: HTMLElement,
+): boolean {
+  const controls = Array.from(
+    container.querySelectorAll(QUESTION_CONTROL_SELECTOR),
+  );
+  return (
+    controls.length > 0 &&
+    controls.every((candidate) => candidate === control)
+  );
+}
+
+function getAncestorPromptText(el: HTMLElement): string {
+  let current: Element | null = el;
+
+  for (let depth = 0; depth < MAX_LABEL_ANCESTOR_DEPTH; depth += 1) {
+    const parent: HTMLElement | null = current?.parentElement ?? null;
+    if (!parent) break;
+    if (parent === el.ownerDocument.body) break;
+    if (!containsOnlyCandidateTextControl(parent, el)) {
+      current = parent;
+      continue;
+    }
+
+    const textBeforeControl = getTextBeforeControl(parent, el);
+    if (textBeforeControl) return textBeforeControl;
+
+    const previousSiblingText = getPreviousSiblingText(parent);
+    if (previousSiblingText) return previousSiblingText;
+
+    current = parent;
+  }
+
+  return "";
+}
+
 export function getCandidateText(el: HTMLElement): string {
   const id = (el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)
     .id;
 
   if (id) {
     const safeId = cssEscape(id);
-    const label = document.querySelector(`label[for="${safeId}"]`);
+    const label = el.ownerDocument.querySelector(`label[for="${safeId}"]`);
     if (label?.textContent?.trim()) return cleanText(label.textContent);
   }
 
@@ -170,7 +380,7 @@ export function getCandidateText(el: HTMLElement): string {
   const placeholder = el.getAttribute("placeholder");
   if (placeholder?.trim()) return cleanText(placeholder);
 
-  return getPreviousSiblingText(el);
+  return getPreviousSiblingText(el) || getAncestorPromptText(el);
 }
 
 function textInputConstruct(el: HTMLInputElement): QuestionConstruct | null {
@@ -234,6 +444,50 @@ function textareaConstruct(el: HTMLTextAreaElement): QuestionConstruct | null {
   };
 }
 
+function selectConstruct(el: HTMLSelectElement): QuestionConstruct | null {
+  const questionText = getCandidateText(el);
+  if (!questionText) return null;
+
+  return {
+    kind: "select",
+    questionText,
+    container: el,
+    elements: [el],
+    isAnswered: () => isSelectAnswered(el),
+    accepts: acceptsSelectRule,
+    fill: (rule, touched) => {
+      if (touched?.has(el)) return false;
+
+      const option = findSelectOptionByRuleValue(el, rule.value);
+      if (!option) return false;
+      if (!el.multiple && el.value === option.value) return false;
+      if (el.multiple && option.selected) return false;
+
+      const alreadyFocused = el.ownerDocument.activeElement === el;
+      try {
+        if (!alreadyFocused) focusForProgrammaticFill(el);
+
+        if (el.multiple) {
+          for (const candidate of Array.from(el.options)) {
+            candidate.selected = false;
+          }
+          option.selected = true;
+        } else {
+          setNativeSelectValue(el, option.value);
+        }
+
+        dispatchEvents(el);
+        return true;
+      } finally {
+        blurAfterProgrammaticFill(
+          el,
+          !alreadyFocused && el.ownerDocument.activeElement === el,
+        );
+      }
+    },
+  };
+}
+
 export function recognizeQuestionConstructs(
   root: ParentNode = document,
 ): QuestionConstruct[] {
@@ -255,6 +509,26 @@ export function recognizeQuestionConstructs(
 
     const construct = textareaConstruct(textarea);
     if (construct) constructs.push(construct);
+  }
+
+  const selects = Array.from(root.querySelectorAll("select"));
+  for (const select of selects) {
+    if (!(select instanceof HTMLSelectElement)) continue;
+
+    const construct = selectConstruct(select);
+    if (construct) constructs.push(construct);
+  }
+
+  for (const group of findCheckboxChoiceGroups(root)) {
+    constructs.push({
+      kind: "checkbox",
+      questionText: group.groupLabel,
+      container: group.container,
+      elements: group.choices.map((choice) => choice.checkbox),
+      isAnswered: () => isCheckboxChoiceGroupAnswered(group),
+      accepts: checkboxGroupAcceptsRule,
+      fill: (rule, touched) => checkCheckboxChoiceGroup(group, rule, touched),
+    });
   }
 
   return constructs;

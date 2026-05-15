@@ -2,9 +2,15 @@ import type { FillStrategy } from "@form-filler/shared";
 import {
   getButtonPressObservation,
   getYesNoCheckboxObservation,
+  getYesNoRadioObservation,
   type RememberedYesNoSelections,
   type YesNoCheckboxObservation,
 } from "./buttonPress";
+import {
+  getCheckboxSelectionObservation,
+  type CheckboxSelectionObservation,
+  type RememberedCheckboxSelections,
+} from "./checkboxFill";
 import { fillPage, getCandidateText } from "./domFill";
 import {
   uploadCoverLetterFromDocuments,
@@ -27,6 +33,12 @@ import {
   type ListboxSelectionObservation,
   type RememberedListboxSelections,
 } from "./listboxFill";
+import {
+  getDropdownOptionClickObservation,
+  noteDropdownTriggerClick,
+  type DropdownSelectionObservation,
+  type RememberedDropdownSelections,
+} from "./dropdownFill";
 import { RULES } from "./rules";
 import { createChromeStorageAdapter, loadAutoFillEnabled } from "./settings";
 
@@ -34,7 +46,9 @@ const REMEMBERED_RADIO_LABEL_KEY = "rememberedRadioLabel";
 const REMEMBERED_RADIO_GROUP_LABEL_KEY = "rememberedRadioGroupLabel";
 const REMEMBERED_RADIO_SELECTIONS_KEY = "rememberedRadioSelections";
 const REMEMBERED_YES_NO_SELECTIONS_KEY = "rememberedYesNoSelections";
+const REMEMBERED_CHECKBOX_SELECTIONS_KEY = "rememberedCheckboxSelections";
 const REMEMBERED_LISTBOX_SELECTIONS_KEY = "rememberedListboxSelections";
+const REMEMBERED_DROPDOWN_SELECTIONS_KEY = "rememberedDropdownSelections";
 const storage = createChromeStorageAdapter();
 
 const touched = new WeakSet<Element>();
@@ -44,7 +58,9 @@ let isFilling = false;
 let learningQueue = Promise.resolve();
 let radioLabelQueue = Promise.resolve();
 let yesNoSelectionQueue = Promise.resolve();
+let checkboxSelectionQueue = Promise.resolve();
 let listboxSelectionQueue = Promise.resolve();
+let dropdownSelectionQueue = Promise.resolve();
 
 function getFieldAnswer(
   field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
@@ -82,7 +98,11 @@ function queueRememberObservation(
 function queueRememberFieldAnswer(
   field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
 ) {
-  queueRememberObservation(getCandidateText(field), getFieldAnswer(field));
+  queueRememberObservation(
+    getCandidateText(field),
+    getFieldAnswer(field),
+    field instanceof HTMLSelectElement ? "select" : undefined,
+  );
 }
 
 function queueRememberRadioLabel(radio: HTMLInputElement) {
@@ -200,6 +220,80 @@ function queueRememberYesNoSelection(observation: YesNoCheckboxObservation) {
     });
 }
 
+function normalizeRememberedCheckboxOptions(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((option): option is string => typeof option === "string");
+  }
+
+  return typeof value === "string" ? [value] : [];
+}
+
+function queueRememberCheckboxSelection(
+  observation: CheckboxSelectionObservation,
+) {
+  const { groupLabel, optionText, checked, checkbox, container } = observation;
+  if (!groupLabel || !optionText) {
+    console.log("[form-filler] checkbox selection not remembered: missing data", {
+      groupLabel,
+      optionText,
+      checkboxName: checkbox.name,
+      checkboxValue: checkbox.value,
+      containerText: container.textContent?.trim(),
+    });
+    return;
+  }
+
+  console.log("[form-filler] queueing checkbox selection memory", {
+    groupLabel,
+    optionText,
+    checked,
+    checkboxName: checkbox.name,
+    checkboxValue: checkbox.value,
+  });
+
+  checkboxSelectionQueue = checkboxSelectionQueue
+    .then(async () => {
+      const selections =
+        (await storage.get<RememberedCheckboxSelections>(
+          REMEMBERED_CHECKBOX_SELECTIONS_KEY,
+        )) ?? {};
+      const currentOptions = normalizeRememberedCheckboxOptions(
+        selections[groupLabel],
+      );
+      const optionKey = optionText.toLowerCase();
+      const nextOptions = checked
+        ? [
+            ...currentOptions.filter(
+              (option) => option.toLowerCase() !== optionKey,
+            ),
+            optionText,
+          ]
+        : currentOptions.filter((option) => option.toLowerCase() !== optionKey);
+
+      const nextSelections: RememberedCheckboxSelections = {
+        ...selections,
+      };
+      if (nextOptions.length > 0) {
+        nextSelections[groupLabel] = nextOptions;
+      } else {
+        delete nextSelections[groupLabel];
+      }
+
+      console.log("[form-filler] committing checkbox selection to memory", {
+        storageKey: REMEMBERED_CHECKBOX_SELECTIONS_KEY,
+        groupLabel,
+        optionText,
+        checked,
+        previousSelections: selections,
+        nextSelections,
+      });
+      await storage.set(REMEMBERED_CHECKBOX_SELECTIONS_KEY, nextSelections);
+    })
+    .catch((err) => {
+      console.warn("Failed to remember checkbox selection", err);
+    });
+}
+
 function queueRememberListboxSelection(
   observation: ListboxSelectionObservation,
 ) {
@@ -257,6 +351,59 @@ function queueRememberListboxSelection(
     });
 }
 
+function queueRememberDropdownSelection(
+  observation: DropdownSelectionObservation,
+) {
+  const { groupLabel, optionText, trigger, option } = observation;
+  if (!groupLabel || !optionText) {
+    console.log("[form-filler] dropdown selection not remembered: missing data", {
+      groupLabel,
+      optionText,
+      triggerText: trigger.textContent?.trim(),
+      optionTextFromElement: option.textContent?.trim(),
+    });
+    return;
+  }
+
+  console.log("[form-filler] queueing dropdown selection memory", {
+    groupLabel,
+    optionText,
+    triggerText: trigger.textContent?.trim(),
+    optionTextFromElement: option.textContent?.trim(),
+  });
+
+  dropdownSelectionQueue = dropdownSelectionQueue
+    .then(async () => {
+      const selections =
+        (await storage.get<RememberedDropdownSelections>(
+          REMEMBERED_DROPDOWN_SELECTIONS_KEY,
+        )) ?? {};
+      console.log("[form-filler] loaded dropdown selections before save", {
+        selections,
+      });
+
+      const nextSelections = {
+        ...selections,
+        [groupLabel]: optionText,
+      };
+      console.log("[form-filler] committing dropdown selection to memory", {
+        storageKey: REMEMBERED_DROPDOWN_SELECTIONS_KEY,
+        groupLabel,
+        optionText,
+        previousSelections: selections,
+        nextSelections,
+      });
+      await storage.set(REMEMBERED_DROPDOWN_SELECTIONS_KEY, nextSelections);
+      console.log("[form-filler] saved dropdown selections", {
+        storageKey: REMEMBERED_DROPDOWN_SELECTIONS_KEY,
+        selections: nextSelections,
+      });
+    })
+    .catch((err) => {
+      console.warn("Failed to remember dropdown selection", err);
+    });
+}
+
 function markTouched(e: Event) {
   // Only consider real user events.
   // Programmatic events dispatched by the extension have isTrusted === false.
@@ -278,7 +425,27 @@ function markTouched(e: Event) {
   if (t instanceof HTMLInputElement && t.type.toLowerCase() === "radio") {
     touched.add(t);
     if ((e.type === "input" || e.type === "change") && t.checked) {
+      const yesNoObservation = getYesNoRadioObservation(t);
+      if (yesNoObservation) {
+        queueRememberYesNoSelection(yesNoObservation);
+        return;
+      }
+
       queueRememberRadioLabel(t);
+    }
+    return;
+  }
+
+  if (t instanceof HTMLInputElement && t.type.toLowerCase() === "checkbox") {
+    touched.add(t);
+    if (e.type === "input" || e.type === "change") {
+      const checkboxObservation = getCheckboxSelectionObservation(t);
+      if (checkboxObservation) {
+        queueRememberCheckboxSelection(checkboxObservation);
+        return;
+      }
+
+      queueRememberFieldAnswer(t);
     }
     return;
   }
@@ -308,6 +475,22 @@ function markTouched(e: Event) {
   }
 
   if (e.type === "click" && t instanceof Element) {
+    const yesNoRadioObservation = getYesNoRadioObservation(t);
+    if (yesNoRadioObservation) {
+      touched.add(yesNoRadioObservation.choice);
+      touched.add(yesNoRadioObservation.container);
+      queueRememberYesNoSelection(yesNoRadioObservation);
+      return;
+    }
+
+    const dropdownObservation = getDropdownOptionClickObservation(t);
+    if (dropdownObservation) {
+      touched.add(dropdownObservation.trigger);
+      touched.add(dropdownObservation.option);
+      queueRememberDropdownSelection(dropdownObservation);
+      return;
+    }
+
     const listboxObservation = getListboxOptionClickObservation(t);
     if (listboxObservation) {
       touched.add(listboxObservation.input);
@@ -321,6 +504,12 @@ function markTouched(e: Event) {
       touched.add(yesNoObservation.choice);
       touched.add(yesNoObservation.container);
       queueRememberYesNoSelection(yesNoObservation);
+      return;
+    }
+
+    if (noteDropdownTriggerClick(t)) {
+      const trigger = t.closest("button, [role='button']");
+      if (trigger) touched.add(trigger);
       return;
     }
 
@@ -349,6 +538,7 @@ async function run() {
     rememberedRadioLabel,
     rememberedRadioGroupLabel,
     rememberedYesNoSelections,
+    rememberedCheckboxSelections,
     rememberedListboxSelections,
   ] = await Promise.all([
     loadLearnedRules().catch((err) => {
@@ -375,6 +565,12 @@ async function run() {
       console.warn("Failed to load remembered yes/no selections", err);
       return undefined;
     }),
+    storage.get<RememberedCheckboxSelections>(
+      REMEMBERED_CHECKBOX_SELECTIONS_KEY,
+    ).catch((err) => {
+      console.warn("Failed to load remembered checkbox selections", err);
+      return undefined;
+    }),
     storage.get<RememberedListboxSelections>(
       REMEMBERED_LISTBOX_SELECTIONS_KEY,
     ).catch((err) => {
@@ -394,6 +590,7 @@ async function run() {
     rememberedRadioGroupLabel,
     radioSelections,
     rememberedYesNoSelections,
+    rememberedCheckboxSelections,
     rememberedListboxSelections,
   });
 
@@ -404,6 +601,7 @@ async function run() {
       filled,
       radioSelections,
       yesNoSelections: rememberedYesNoSelections,
+      checkboxSelections: rememberedCheckboxSelections,
       listboxSelections: rememberedListboxSelections,
     });
     fillPage(RULES, {

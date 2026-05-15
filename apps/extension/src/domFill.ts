@@ -5,6 +5,11 @@ import {
   type RememberedYesNoSelections,
 } from "./buttonPress";
 import {
+  selectRememberedCheckboxOptions,
+  type RememberedCheckboxSelections,
+} from "./checkboxFill";
+import {
+  focusAndBlurTextControl,
   getCandidateText,
   recognizeQuestionConstructs,
 } from "./questionConstructs";
@@ -26,6 +31,7 @@ export function fillPage(
     filled?: WeakSet<Element>;
     radioSelections?: RememberedRadioSelections;
     yesNoSelections?: RememberedYesNoSelections;
+    checkboxSelections?: RememberedCheckboxSelections;
     listboxSelections?: RememberedListboxSelections;
   },
 ) {
@@ -37,6 +43,7 @@ export function fillPage(
     hasFilledSet: Boolean(filled),
     radioSelections: opts?.radioSelections,
     yesNoSelections: opts?.yesNoSelections,
+    checkboxSelections: opts?.checkboxSelections,
     listboxSelections: opts?.listboxSelections,
   });
 
@@ -66,6 +73,22 @@ export function fillPage(
   }
 
   if (
+    opts?.checkboxSelections &&
+    Object.keys(opts.checkboxSelections).length > 0
+  ) {
+    console.log("[form-filler] starting checkbox fill", {
+      checkboxSelections: opts.checkboxSelections,
+    });
+    selectRememberedCheckboxOptions(
+      opts.checkboxSelections,
+      document,
+      filled,
+    );
+  } else {
+    console.log("[form-filler] skipping checkbox fill: no remembered selections");
+  }
+
+  if (
     opts?.listboxSelections &&
     Object.keys(opts.listboxSelections).length > 0
   ) {
@@ -84,7 +107,21 @@ export function fillPage(
     console.log("[form-filler] skipping listbox fill: no remembered selections");
   }
 
-  for (const construct of recognizeQuestionConstructs()) {
+  const filledTextControls: Array<HTMLInputElement | HTMLTextAreaElement> = [];
+  const filledTextControlSet = new Set<HTMLInputElement | HTMLTextAreaElement>();
+  const queueTextControlForFocusPass = (el: Element) => {
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    if (el.value.trim().length === 0) return;
+    if (filledTextControlSet.has(el)) return;
+
+    filledTextControlSet.add(el);
+    filledTextControls.push(el);
+  };
+
+  const constructs = recognizeQuestionConstructs();
+  for (const construct of constructs) {
     try {
       if (filled?.has(construct.container)) continue;
       if (construct.elements.some((el) => touched?.has(el))) continue;
@@ -97,12 +134,40 @@ export function fillPage(
       const didFill = construct.fill(rule, touched);
       if (!didFill) continue;
 
+      for (const el of construct.elements) {
+        queueTextControlForFocusPass(el);
+      }
+
       filled?.add(construct.container);
       for (const el of construct.elements) filled?.add(el);
     } catch (err) {
       console.warn("Failed to fill form question", {
         kind: construct.kind,
         question: construct.questionText,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  for (const construct of constructs) {
+    if (construct.elements.some((el) => touched?.has(el))) continue;
+    if (
+      !filled?.has(construct.container) &&
+      !construct.elements.some((el) => filled?.has(el))
+    ) {
+      continue;
+    }
+
+    for (const el of construct.elements) {
+      queueTextControlForFocusPass(el);
+    }
+  }
+
+  for (const control of filledTextControls) {
+    try {
+      focusAndBlurTextControl(control);
+    } catch (err) {
+      console.warn("Failed to focus/blur filled text control", {
         error: err instanceof Error ? err.message : String(err),
       });
     }

@@ -57,6 +57,51 @@ describe("findFileUploader", () => {
     expect(input?.id).toBe("_systemfield_resume");
   });
 
+  it("finds Gem-style uploaders with prompts before nested file inputs", () => {
+    document.body.innerHTML = `
+      <section>
+        <div class="gem-field">
+          <span>Resume <span>*</span></span>
+          <div>
+            <div>
+              <input id="gem-resume" type="file" />
+              <div>Click to upload or drag and drop here</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+
+    const input = findResumeUploader();
+    expect(input?.id).toBe("gem-resume");
+  });
+
+  it("does not reuse a previous upload label for a nested file input", () => {
+    document.body.innerHTML = `
+      <section>
+        <div class="gem-field">
+          <span>Resume</span>
+          <div>
+            <div>
+              <input id="resume" type="file" />
+            </div>
+          </div>
+        </div>
+
+        <div class="gem-field">
+          <div>
+            <div>
+              <input id="cover-letter" type="file" />
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+
+    const input = findCoverLetterUploader();
+    expect(input).toBeNull();
+  });
+
   it("skips upload instead of throwing when the bundled document is missing", async () => {
     document.body.innerHTML = `
       <label for="cover-letter">Cover letter</label>
